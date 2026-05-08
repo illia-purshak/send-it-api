@@ -321,7 +321,10 @@ export class AuthService {
       throw new UnauthorizedException('Invalid or expired pending token');
     }
 
-    if (payload.type !== 'pending_2fa') {
+    if (
+      payload.type !== 'pending_2fa' ||
+      (payload as { entityType?: string }).entityType === 'admin'
+    ) {
       throw new UnauthorizedException('Invalid token type');
     }
 

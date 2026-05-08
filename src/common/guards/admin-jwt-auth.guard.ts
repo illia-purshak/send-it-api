@@ -4,27 +4,24 @@ import {
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
-import { Reflector } from '@nestjs/core';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-import { IS_PUBLIC_KEY } from '../decorators/public.decorator.js';
-import type { JwtPayload, JwtUser } from '../../types/auth.types.js';
+import type {
+  AdminJwtPayload,
+  AdminJwtUser,
+  AdminSetupRequiredJwtPayload,
+} from '../../types/admin-auth.types.js';
+
+type AdminTokenPayload = AdminJwtPayload | AdminSetupRequiredJwtPayload;
 
 @Injectable()
-export class JwtAuthGuard implements CanActivate {
+export class AdminJwtAuthGuard implements CanActivate {
   constructor(
     private readonly jwtService: JwtService,
-    private readonly reflector: Reflector,
     private readonly configService: ConfigService,
   ) {}
 
   canActivate(context: ExecutionContext): boolean {
-    const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
-      context.getHandler(),
-      context.getClass(),
-    ]);
-    if (isPublic) return true;
-
     const request = context.switchToHttp().getRequest();
     const authHeader: string | undefined = request.headers['authorization'];
 
@@ -35,27 +32,29 @@ export class JwtAuthGuard implements CanActivate {
     }
 
     const token = authHeader.slice(7);
-    let payload: JwtPayload;
+    let payload: AdminTokenPayload;
 
     try {
-      payload = this.jwtService.verify<JwtPayload>(token, {
+      payload = this.jwtService.verify<AdminTokenPayload>(token, {
         secret: this.configService.getOrThrow<string>('JWT_ACCESS_SECRET'),
       });
     } catch {
       throw new UnauthorizedException('Invalid or expired access token');
     }
 
-    if (
-      payload.type !== 'access' ||
-      (payload as { entityType?: string }).entityType === 'admin'
-    ) {
+    if (payload.entityType !== 'admin') {
       throw new UnauthorizedException('Invalid token type');
     }
 
-    const user: JwtUser = {
+    if (payload.type !== 'access' && payload.type !== 'setup_required') {
+      throw new UnauthorizedException('Invalid token type');
+    }
+
+    const user: AdminJwtUser = {
       id: payload.sub,
       email: payload.email,
       role: payload.role,
+      type: payload.type,
     };
     request.user = user;
     return true;

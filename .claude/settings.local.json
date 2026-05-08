@@ -5,7 +5,8 @@
       "Bash(node *)",
       "Bash(pnpm add *)",
       "Bash(pnpm approve-builds *)",
-      "Bash(pnpm lint *)"
+      "Bash(pnpm lint *)",
+      "Bash(Get-ChildItem *)"
     ]
   }
 }
