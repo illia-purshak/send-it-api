@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node -e \"const fs=require\\('fs'\\); const d=JSON.parse\\(fs.readFileSync\\('/dev/stdin','utf8'\\)\\); console.log\\(d.version, JSON.stringify\\(d.exports?.['.']\\), d.main\\)\")",
+      "Bash(node *)",
+      "Bash(pnpm add *)",
+      "Bash(pnpm approve-builds *)",
+      "Bash(pnpm lint *)"
+    ]
+  }
+}

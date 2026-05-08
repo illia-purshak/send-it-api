@@ -1,0 +1,423 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../generated/prisma"
+  moduleFormat = "cjs"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================================
+// ENUMS
+// ============================================================
+
+enum UserRole {
+  CLIENT
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  BANNED
+  DELETED
+}
+
+enum AdminRole {
+  ADMIN
+  SUPER_ADMIN
+}
+
+enum AdminStatus {
+  ACTIVE
+  INACTIVE
+  DELETED
+}
+
+enum SubscriptionLevel {
+  FREE    // Рівень 0 — 1 оператор, без переваг
+  PRO     // Рівень 1 — платний
+  BUSINESS // Рівень 2 — максимальний
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  CANCELLED        // Скасована, діє до кінця місяця
+  PENDING_UPGRADE  // Запланований перехід вище з наступного місяця
+  PENDING_DOWNGRADE // Запланований перехід нижче з наступного місяця
+  EXPIRED
+}
+
+enum BillingStatus {
+  PAID
+  FAILED
+  REFUNDED
+}
+
+enum NotificationType {
+  SHIPMENT_STATUS   // Зміна статусу відправлення
+  SUBSCRIPTION      // Нагадування про підписку
+  SYSTEM            // Системне сповіщення
+}
+
+enum SupportTicketStatus {
+  OPEN
+  CLOSED
+}
+
+// ============================================================
+// USER (CLIENT)
+// ============================================================
+
+model User {
+  id               Int         @id @default(autoincrement())
+  email            String?     @unique
+  phoneNumber      String?     @unique
+  role             UserRole    @default(CLIENT)
+  status           UserStatus  @default(INACTIVE)
+  profileCompleted Boolean     @default(false)
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+
+  // Relations
+  credentials         UserCredentials?
+  refreshTokens       RefreshToken[]
+  resetPasswordTokens ResetPasswordToken[]
+  profile             UserProfile?
+  twoFactorAuth       TwoFactorAuth?
+  postalConnections   UserPostalConnection[]
+  subscription        UserSubscription?
+  billingHistory      BillingHistory[]
+  shipmentTemplates   ShipmentTemplate[]
+  recipients          Recipient[]
+  notifications       Notification[]
+  supportTickets      SupportTicket[]
+  supportMessages     SupportMessage[]
+}
+
+// ============================================================
+// USER PROFILE (Organization only — B2B)
+// ============================================================
+
+model UserProfile {
+  userId            Int     @id
+  companyName       String
+  companyNameLat    String?
+  edrpou            String  @unique
+  taxNumber         String?
+  legalAddress      String
+  contactPersonName String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ============================================================
+// AUTH — CREDENTIALS, TOKENS
+// ============================================================
+
+model UserCredentials {
+  userId       Int      @id
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model RefreshToken {
+  id        Int       @id @default(autoincrement())
+  userId    Int
+  tokenHash String
+  revokedAt DateTime?
+  expiresAt DateTime
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt])
+}
+
+model ResetPasswordToken {
+  id              Int       @id @default(autoincrement())
+  userId          Int
+  tokenHash       String
+  tokenLookupHash String    @unique
+  usedAt          DateTime?
+  expiresAt       DateTime
+  createdAt       DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ============================================================
+// TWO FACTOR AUTH
+// ============================================================
+
+model TwoFactorAuth {
+  userId    Int      @id
+  secret    String   // TOTP secret (зашифрований)
+  isEnabled Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// ============================================================
+// ADMIN
+// ============================================================
+
+model Admin {
+  id          Int         @id @default(autoincrement())
+  email       String      @unique
+  firstName   String
+  lastName    String
+  role        AdminRole   @default(ADMIN)
+  status      AdminStatus @default(INACTIVE)
+  invitedById Int?        // null для першого SUPER_ADMIN
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+
+  // Relations
+  invitedBy       Admin?          @relation("AdminInvitedBy", fields: [invitedById], references: [id])
+  invitedAdmins   Admin[]         @relation("AdminInvitedBy")
+  credentials     AdminCredentials?
+  refreshTokens   AdminRefreshToken[]
+  adminInvites    AdminInvite[]   @relation("InvitedBy")
+  twoFactorAuth   AdminTwoFactorAuth?
+  supportMessages SupportMessage[]
+
+  @@index([email])
+}
+
+model AdminCredentials {
+  adminId      Int      @id
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  admin Admin @relation(fields: [adminId], references: [id], onDelete: Cascade)
+}
+
+model AdminRefreshToken {
+  id        Int       @id @default(autoincrement())
+  adminId   Int
+  tokenHash String
+  revokedAt DateTime?
+  expiresAt DateTime
+  createdAt DateTime  @default(now())
+
+  admin Admin @relation(fields: [adminId], references: [id], onDelete: Cascade)
+
+  @@index([adminId, revokedAt])
+}
+
+// 2FA для ADMIN (обов'язкова, SUPER_ADMIN не потребує)
+model AdminTwoFactorAuth {
+  adminId   Int      @id
+  secret    String   // TOTP secret (зашифрований)
+  isEnabled Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  admin Admin @relation(fields: [adminId], references: [id], onDelete: Cascade)
+}
+
+// Запрошення адмінів — тільки SUPER_ADMIN може запрошувати
+model AdminInvite {
+  id          Int       @id @default(autoincrement())
+  email       String
+  token       String    @unique // invite токен (надсилається на email)
+  invitedById Int
+  usedAt      DateTime?
+  expiresAt   DateTime
+  createdAt   DateTime  @default(now())
+
+  invitedBy Admin @relation("InvitedBy", fields: [invitedById], references: [id])
+
+  @@index([email])
+}
+
+// ============================================================
+// POSTAL SERVICES
+// ============================================================
+
+// Довідник операторів (керується адміном через /admin/services)
+model PostalService {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique // "Нова Пошта", "Укрпошта", "Мост"
+  slug        String   @unique // "nova-poshta", "ukrposhta", "mist"
+  logoUrl     String?
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  userConnections   UserPostalConnection[]
+  shipmentTemplates ShipmentTemplate[]
+}
+
+// Підключення клієнта до оператора через API ключ
+model UserPostalConnection {
+  id              Int      @id @default(autoincrement())
+  userId          Int
+  postalServiceId Int
+  apiKey          String   // зашифрований API ключ
+  isActive        Boolean  @default(true)
+  connectedAt     DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  postalService PostalService @relation(fields: [postalServiceId], references: [id])
+
+  @@unique([userId, postalServiceId])
+  @@index([userId])
+}
+
+// ============================================================
+// SUBSCRIPTION & BILLING
+// ============================================================
+
+// Довідник планів (адмін може керувати через /admin/services або хардкод)
+model SubscriptionPlan {
+  id               Int               @id @default(autoincrement())
+  level            SubscriptionLevel @unique
+  name             String            // "Free", "Pro", "Business"
+  price            Decimal           @db.Decimal(10, 2)
+  maxOperators     Int               // макс. кількість підключених операторів
+  description      String?
+  isActive         Boolean           @default(true)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  subscriptions UserSubscription[]
+  billingHistory BillingHistory[]
+}
+
+model UserSubscription {
+  id                 Int                @id @default(autoincrement())
+  userId             Int                @unique
+  planId             Int
+  status             SubscriptionStatus @default(ACTIVE)
+  currentPeriodStart DateTime
+  currentPeriodEnd   DateTime
+  nextPlanId         Int?               // запланована зміна плану
+  cancelledAt        DateTime?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  user     User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan     SubscriptionPlan @relation(fields: [planId], references: [id])
+
+  @@index([userId])
+}
+
+// Історія списань за підписку
+model BillingHistory {
+  id        Int           @id @default(autoincrement())
+  userId    Int
+  planId    Int
+  amount    Decimal       @db.Decimal(10, 2)
+  status    BillingStatus @default(PAID)
+  periodStart DateTime
+  periodEnd   DateTime
+  paidAt    DateTime?
+  createdAt DateTime      @default(now())
+
+  user User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan SubscriptionPlan @relation(fields: [planId], references: [id])
+
+  @@index([userId])
+}
+
+// ============================================================
+// SHIPMENT TEMPLATES
+// ============================================================
+
+model ShipmentTemplate {
+  id              Int      @id @default(autoincrement())
+  userId          Int
+  postalServiceId Int
+  name            String   // назва шаблону
+  templateData    Json     // динамічні поля форми залежно від оператора
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  postalService PostalService @relation(fields: [postalServiceId], references: [id])
+
+  @@index([userId])
+}
+
+// ============================================================
+// RECIPIENTS (адресна книга)
+// ============================================================
+
+model Recipient {
+  id          Int      @id @default(autoincrement())
+  userId      Int
+  firstName   String
+  lastName    String
+  phone       String
+  email       String?
+  address     String?  // адреса або відділення
+  note        String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// ============================================================
+// NOTIFICATIONS
+// ============================================================
+
+model Notification {
+  id        Int              @id @default(autoincrement())
+  userId    Int
+  type      NotificationType
+  title     String
+  body      String
+  isRead    Boolean          @default(false)
+  createdAt DateTime         @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+}
+
+// ============================================================
+// SUPPORT
+// ============================================================
+
+model SupportTicket {
+  id        Int                 @id @default(autoincrement())
+  userId    Int
+  subject   String
+  status    SupportTicketStatus @default(OPEN)
+  closedAt  DateTime?
+  createdAt DateTime            @default(now())
+  updatedAt DateTime            @updatedAt
+
+  user     User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages SupportMessage[]
+
+  @@index([userId, status])
+}
+
+model SupportMessage {
+  id        Int      @id @default(autoincrement())
+  ticketId  Int
+  userId    Int?     // якщо пише клієнт
+  adminId   Int?     // якщо пише адмін
+  body      String
+  createdAt DateTime @default(now())
+
+  ticket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  user   User?         @relation(fields: [userId], references: [id])
+  admin  Admin?        @relation(fields: [adminId], references: [id])
+
+  @@index([ticketId])
+}
