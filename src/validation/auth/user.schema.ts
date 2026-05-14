@@ -43,3 +43,14 @@ export const TwoFactorVerifySchema = z.object({
   totpCode: z.string().length(6),
 });
 export type TwoFactorVerifyDto = z.infer<typeof TwoFactorVerifySchema>;
+
+export const CompleteProfileSchema = z.object({
+  profileSetupToken: z.string().min(1),
+  companyName: z.string().min(1).max(255),
+  companyNameLat: z.string().max(255).optional(),
+  edrpou: z.string().length(8),
+  taxNumber: z.string().optional(),
+  legalAddress: z.string().min(1).max(500),
+  contactPersonName: z.string().max(255).optional(),
+});
+export type CompleteProfileDto = z.infer<typeof CompleteProfileSchema>;
