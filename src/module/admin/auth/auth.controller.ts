@@ -11,7 +11,6 @@ import {
   ApiBearerAuth,
   ApiBody,
   ApiConflictResponse,
-  ApiForbiddenResponse,
   ApiOkResponse,
   ApiOperation,
   ApiTags,
@@ -41,13 +40,12 @@ import type { AdminJwtUser } from '../../../types/admin-auth.types.js';
 import {
   acceptInviteBodySchema,
   acceptInviteResponseSchema,
+  adminLoginResponseSchema,
   adminEnable2faResponseSchema,
   badRequestErrorSchema,
   conflictErrorSchema,
   disable2faResponseSchema,
-  forbiddenErrorSchema,
   loginBodySchema,
-  loginResponseSchema,
   logoutBodySchema,
   logoutResponseSchema,
   refreshBodySchema,
@@ -81,12 +79,12 @@ export class AdminAuthController {
   @ApiOperation({ summary: 'Log in an admin account' })
   @ApiBody({ schema: loginBodySchema })
   @ApiOkResponse({
-    description: 'Returns tokens directly or a pending token when admin 2FA verification is required',
-    schema: loginResponseSchema,
+    description:
+      'Returns tokens directly, a pending token for admin 2FA verification, or a setup token for first-time admin onboarding',
+    schema: adminLoginResponseSchema,
   })
   @ApiBadRequestResponse({ description: 'Validation error', schema: badRequestErrorSchema })
   @ApiUnauthorizedResponse({ description: 'Invalid credentials', schema: unauthorizedErrorSchema })
-  @ApiForbiddenResponse({ description: 'Admin account setup is incomplete', schema: forbiddenErrorSchema })
   login(@Body(new ZodValidationPipe(AdminLoginSchema)) dto: AdminLoginDto) {
     return this.adminAuthService.login(dto);
   }

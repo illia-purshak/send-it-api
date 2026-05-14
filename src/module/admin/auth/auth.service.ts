@@ -46,8 +46,6 @@ export class AdminAuthService {
     private readonly configService: ConfigService,
   ) {}
 
-  // ─── Private helpers ──────────────────────────────────────────────────────
-
   private issueAccessToken(admin: {
     id: number;
     email: string;
@@ -114,8 +112,6 @@ export class AdminAuthService {
     return { accessToken, refreshToken };
   }
 
-  // ─── Public methods ───────────────────────────────────────────────────────
-
   async acceptInvite(dto: AcceptInviteDto): Promise<{ setupToken: string }> {
     const tokenHash = hashSha256(dto.token);
 
@@ -162,6 +158,7 @@ export class AdminAuthService {
   ): Promise<
     | { requires2FA: false; accessToken: string; refreshToken: string }
     | { requires2FA: true; pendingToken: string }
+    | { requiresSetup: true; setupToken: string }
   > {
     const admin = await this.prisma.db.admin.findUnique({
       where: { email: dto.email },
@@ -191,12 +188,11 @@ export class AdminAuthService {
       const tokens = await this.issueTokenPair(admin);
       return { requires2FA: false, ...tokens };
     }
-
-    // ADMIN role
     if (admin.status !== 'ACTIVE' || !admin.twoFactorAuth?.isEnabled) {
-      throw new ForbiddenException(
-        'Account setup incomplete. Please complete 2FA setup.',
-      );
+      return {
+        requiresSetup: true,
+        setupToken: this.issueSetupToken(admin),
+      };
     }
 
     const pendingToken = this.issuePendingToken(admin.id);

@@ -1,4 +1,4 @@
-import { Body, Controller, HttpCode, Post } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Post } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiBearerAuth,
@@ -25,6 +25,7 @@ import {
   LogoutSchema,
   TwoFactorEnableSchema,
   TwoFactorVerifySchema,
+  CompleteProfileSchema,
   type RegisterDto,
   type LoginDto,
   type RefreshDto,
@@ -33,10 +34,12 @@ import {
   type LogoutDto,
   type TwoFactorEnableDto,
   type TwoFactorVerifyDto,
+  type CompleteProfileDto,
 } from '../../../validation/auth/user.schema.js';
 import type { JwtUser } from '../../../types/auth.types.js';
 import {
   badRequestErrorSchema,
+  completeProfileBodySchema,
   conflictErrorSchema,
   disable2faResponseSchema,
   enable2faResponseSchema,
@@ -47,6 +50,7 @@ import {
   loginResponseSchema,
   logoutBodySchema,
   logoutResponseSchema,
+  meResponseSchema,
   refreshBodySchema,
   registerBodySchema,
   registerResponseSchema,
@@ -63,6 +67,15 @@ import {
 @Controller(AUTH_ROUTES.BASE)
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
+
+  @Get(AUTH_ROUTES.ME)
+  @ApiOperation({ summary: 'Get the current authenticated user' })
+  @ApiBearerAuth('bearer')
+  @ApiOkResponse({ description: 'Current user profile', schema: meResponseSchema })
+  @ApiUnauthorizedResponse({ description: 'Missing or invalid access token', schema: unauthorizedErrorSchema })
+  getMe(@CurrentUser() user: JwtUser) {
+    return this.authService.getMe(user);
+  }
 
   @Public()
   @Post(AUTH_ROUTES.REGISTER)
@@ -81,12 +94,12 @@ export class AuthController {
   @ApiOperation({ summary: 'Log in a user' })
   @ApiBody({ schema: loginBodySchema })
   @ApiOkResponse({
-    description: 'Returns tokens directly or a pending token when 2FA is enabled',
+    description: 'Returns tokens, a pending 2FA token, or a profile setup token when profile is incomplete',
     schema: loginResponseSchema,
   })
   @ApiBadRequestResponse({ description: 'Validation error', schema: badRequestErrorSchema })
   @ApiUnauthorizedResponse({ description: 'Invalid credentials', schema: unauthorizedErrorSchema })
-  @ApiForbiddenResponse({ description: 'Account is banned or inactive', schema: forbiddenErrorSchema })
+  @ApiForbiddenResponse({ description: 'Account is banned', schema: forbiddenErrorSchema })
   login(@Body(new ZodValidationPipe(LoginSchema)) dto: LoginDto) {
     return this.authService.login(dto);
   }
@@ -201,5 +214,21 @@ export class AuthController {
     @Body(new ZodValidationPipe(TwoFactorVerifySchema)) dto: TwoFactorVerifyDto,
   ) {
     return this.authService.verify2fa(dto);
+  }
+
+  @Public()
+  @Post(AUTH_ROUTES.COMPLETE_PROFILE)
+  @HttpCode(200)
+  @ApiOperation({ summary: 'Complete user profile after registration' })
+  @ApiBody({ schema: completeProfileBodySchema })
+  @ApiOkResponse({ description: 'Profile completed, returns token pair', schema: tokenPairResponseSchema })
+  @ApiBadRequestResponse({ description: 'Validation error', schema: badRequestErrorSchema })
+  @ApiUnauthorizedResponse({ description: 'Setup token is invalid or expired', schema: unauthorizedErrorSchema })
+  @ApiConflictResponse({ description: 'Profile already completed or EDRPOU in use', schema: conflictErrorSchema })
+  @ApiForbiddenResponse({ description: 'Account is banned or deleted', schema: forbiddenErrorSchema })
+  completeProfile(
+    @Body(new ZodValidationPipe(CompleteProfileSchema)) dto: CompleteProfileDto,
+  ) {
+    return this.authService.completeProfile(dto);
   }
 }

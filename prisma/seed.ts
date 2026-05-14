@@ -12,8 +12,6 @@ async function main() {
 
   const passwordHash = await bcrypt.hash(PASSWORD, 10);
 
-  // ── Subscription plans ──────────────────────────────────────────────────────
-
   await db.subscriptionPlan.upsert({
     where: { level: 'FREE' },
     create: { level: 'FREE', name: 'Free', price: 0, maxOperators: 1 },
@@ -37,11 +35,35 @@ async function main() {
     update: {},
   });
 
+  await db.postalService.upsert({
+    where: { slug: 'nova-post' },
+    create: {
+      slug: 'nova-post',
+      name: 'Nova Post',
+      isActive: true,
+    },
+    update: {
+      name: 'Nova Post',
+      isActive: true,
+    },
+  });
+
+  await db.postalService.upsert({
+    where: { slug: 'nova-poshta' },
+    create: {
+      slug: 'nova-poshta',
+      name: 'Nova Poshta',
+      isActive: true,
+    },
+    update: {
+      name: 'Nova Poshta',
+      isActive: true,
+    },
+  });
+
   const freePlan = await db.subscriptionPlan.findUniqueOrThrow({
     where: { level: 'FREE' },
   });
-
-  // ── CLIENT ──────────────────────────────────────────────────────────────────
 
   const client = await db.user.upsert({
     where: { email: 'client@sendit.dev' },
@@ -51,24 +73,28 @@ async function main() {
       status: 'ACTIVE',
       profileCompleted: true,
     },
-    update: {},
+    update: {
+      role: 'CLIENT',
+      status: 'ACTIVE',
+      profileCompleted: true,
+    },
   });
 
   await db.userCredentials.upsert({
     where: { userId: client.id },
     create: { userId: client.id, passwordHash },
-    update: {},
+    update: { passwordHash },
   });
 
   await db.userProfile.upsert({
     where: { userId: client.id },
     create: {
       userId: client.id,
-      companyName: 'ТОВ «Тестова Компанія»',
+      companyName: 'РўРћР’ В«РўРµСЃС‚РѕРІР° РљРѕРјРїР°РЅС–СЏВ»',
       companyNameLat: 'Test Company LLC',
       edrpou: '12345678',
-      legalAddress: 'м. Київ, вул. Хрещатик, 1',
-      contactPersonName: 'Іван Іваненко',
+      legalAddress: 'Рј. РљРёС—РІ, РІСѓР». РҐСЂРµС‰Р°С‚РёРє, 1',
+      contactPersonName: 'Р†РІР°РЅ Р†РІР°РЅРµРЅРєРѕ',
     },
     update: {},
   });
@@ -89,8 +115,6 @@ async function main() {
     update: {},
   });
 
-  // ── ADMIN ───────────────────────────────────────────────────────────────────
-
   const admin = await db.admin.upsert({
     where: { email: 'admin@sendit.dev' },
     create: {
@@ -100,16 +124,19 @@ async function main() {
       role: 'ADMIN',
       status: 'ACTIVE',
     },
-    update: {},
+    update: {
+      firstName: 'Admin',
+      lastName: 'User',
+      role: 'ADMIN',
+      status: 'ACTIVE',
+    },
   });
 
   await db.adminCredentials.upsert({
     where: { adminId: admin.id },
     create: { adminId: admin.id, passwordHash },
-    update: {},
+    update: { passwordHash },
   });
-
-  // ── SUPER_ADMIN ─────────────────────────────────────────────────────────────
 
   const superAdmin = await db.admin.upsert({
     where: { email: 'superadmin@sendit.dev' },
@@ -120,13 +147,18 @@ async function main() {
       role: 'SUPER_ADMIN',
       status: 'ACTIVE',
     },
-    update: {},
+    update: {
+      firstName: 'Super',
+      lastName: 'Admin',
+      role: 'SUPER_ADMIN',
+      status: 'ACTIVE',
+    },
   });
 
   await db.adminCredentials.upsert({
     where: { adminId: superAdmin.id },
     create: { adminId: superAdmin.id, passwordHash },
-    update: {},
+    update: { passwordHash },
   });
 
   await db.$disconnect();

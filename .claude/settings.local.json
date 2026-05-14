@@ -6,7 +6,22 @@
       "Bash(pnpm add *)",
       "Bash(pnpm approve-builds *)",
       "Bash(pnpm lint *)",
-      "Bash(Get-ChildItem *)"
+      "Bash(Get-ChildItem *)",
+      "PowerShell(node -e \"const p=require\\('./node_modules/prisma/package.json'\\); console.log\\(JSON.stringify\\(p.bin\\)\\)\")",
+      "Bash(docker --version)",
+      "Bash(docker info *)",
+      "Bash(where psql *)",
+      "Bash(psql --version)",
+      "Bash(winget list *)",
+      "Bash(docker run *)",
+      "Bash(docker start *)",
+      "PowerShell(docker exec *)",
+      "Bash(docker exec *)",
+      "PowerShell(Get-Process *)",
+      "Bash(docker compose *)",
+      "Bash(pnpm prisma *)",
+      "PowerShell(browser-use *)",
+      "Bash(pnpm exec *)"
     ]
   }
 }

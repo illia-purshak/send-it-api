@@ -24,6 +24,6 @@ type JwtExpiresIn = NonNullable<JwtSignOptions['expiresIn']>;
   ],
   controllers: [AdminAuthController],
   providers: [AdminAuthService, AdminJwtAuthGuard],
-  exports: [AdminJwtAuthGuard],
+  exports: [AdminJwtAuthGuard, JwtModule],
 })
 export class AdminAuthModule {}

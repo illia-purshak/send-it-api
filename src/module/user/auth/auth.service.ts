@@ -23,6 +23,7 @@ import type {
   JwtPayload,
   JwtUser,
   PendingJwtPayload,
+  ProfileSetupJwtPayload,
 } from '../../../types/auth.types.js';
 import type {
   RegisterDto,
@@ -33,6 +34,7 @@ import type {
   LogoutDto,
   TwoFactorEnableDto,
   TwoFactorVerifyDto,
+  CompleteProfileDto,
 } from '../../../validation/auth/user.schema.js';
 
 const REFRESH_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -47,8 +49,6 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
   ) {}
-
-  // ─── Private helpers ──────────────────────────────────────────────────────
 
   private issueAccessToken(user: {
     id: number;
@@ -83,6 +83,14 @@ export class AuthService {
     });
   }
 
+  private issueProfileSetupToken(userId: number): string {
+    const payload: ProfileSetupJwtPayload = { sub: userId, type: 'profile_setup' };
+    return this.jwtService.sign(payload, {
+      secret: this.configService.getOrThrow<string>('JWT_PENDING_SECRET'),
+      expiresIn: '30m' as JwtExpiresIn,
+    });
+  }
+
   private async issueTokenPair(user: {
     id: number;
     email: string | null;
@@ -93,11 +101,19 @@ export class AuthService {
     return { accessToken, refreshToken };
   }
 
-  // ─── Public methods ───────────────────────────────────────────────────────
+  async getMe(user: JwtUser) {
+    const record = await this.prisma.db.user.findUniqueOrThrow({
+      where: { id: user.id },
+      include: { profile: true },
+    });
+    const { profile, ...rest } = record;
+    return { ...rest, profile: profile ?? null };
+  }
 
-  async register(
-    dto: RegisterDto,
-  ): Promise<{ id: number; email: string | null }> {
+  async register(dto: RegisterDto): Promise<{
+    requiresProfileCompletion: true;
+    profileSetupToken: string;
+  }> {
     const existing = await this.prisma.db.user.findUnique({
       where: { email: dto.email },
     });
@@ -113,7 +129,8 @@ export class AuthService {
       data: { userId: user.id, passwordHash },
     });
 
-    return { id: user.id, email: user.email };
+    const profileSetupToken = this.issueProfileSetupToken(user.id);
+    return { requiresProfileCompletion: true, profileSetupToken };
   }
 
   async login(
@@ -121,6 +138,7 @@ export class AuthService {
   ): Promise<
     | { requires2FA: false; accessToken: string; refreshToken: string }
     | { requires2FA: true; pendingToken: string }
+    | { requiresProfileCompletion: true; profileSetupToken: string }
   > {
     const user = await this.prisma.db.user.findUnique({
       where: { email: dto.email },
@@ -146,9 +164,8 @@ export class AuthService {
       throw new ForbiddenException('Account is banned');
     }
     if (user.status === 'INACTIVE') {
-      throw new ForbiddenException(
-        'Account is inactive. Please complete your profile.',
-      );
+      const profileSetupToken = this.issueProfileSetupToken(user.id);
+      return { requiresProfileCompletion: true, profileSetupToken };
     }
 
     if (user.twoFactorAuth?.isEnabled) {
@@ -340,6 +357,61 @@ export class AuthService {
     const secret = decryptTotp(user.twoFactorAuth.secret);
     const result = verifySync({ token: dto.totpCode, secret });
     if (!result.valid) throw new UnauthorizedException('Invalid TOTP code');
+
+    return this.issueTokenPair(user);
+  }
+
+  async completeProfile(
+    dto: CompleteProfileDto,
+  ): Promise<{ accessToken: string; refreshToken: string }> {
+    let payload: ProfileSetupJwtPayload;
+    try {
+      payload = this.jwtService.verify<ProfileSetupJwtPayload>(
+        dto.profileSetupToken,
+        { secret: this.configService.getOrThrow<string>('JWT_PENDING_SECRET') },
+      );
+    } catch {
+      throw new UnauthorizedException('Invalid or expired setup token');
+    }
+
+    if (payload.type !== 'profile_setup') {
+      throw new UnauthorizedException('Invalid token type');
+    }
+
+    const user = await this.prisma.db.user.findUnique({
+      where: { id: payload.sub },
+    });
+
+    if (!user) throw new UnauthorizedException('User not found');
+    if (user.status === 'DELETED' || user.status === 'BANNED') {
+      throw new ForbiddenException('Account access denied');
+    }
+    if (user.profileCompleted) {
+      throw new ConflictException('Profile already completed');
+    }
+
+    const existingProfile = await this.prisma.db.userProfile.findUnique({
+      where: { edrpou: dto.edrpou },
+    });
+    if (existingProfile) throw new ConflictException('EDRPOU already in use');
+
+    await this.prisma.db.$transaction(async (tx) => {
+      await tx.userProfile.create({
+        data: {
+          userId: user.id,
+          companyName: dto.companyName,
+          companyNameLat: dto.companyNameLat,
+          edrpou: dto.edrpou,
+          taxNumber: dto.taxNumber,
+          legalAddress: dto.legalAddress,
+          contactPersonName: dto.contactPersonName,
+        },
+      });
+      await tx.user.update({
+        where: { id: user.id },
+        data: { status: 'ACTIVE', profileCompleted: true },
+      });
+    });
 
     return this.issueTokenPair(user);
   }

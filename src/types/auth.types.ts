@@ -17,3 +17,8 @@ export interface PendingJwtPayload {
   sub: number;
   type: 'pending_2fa';
 }
+
+export interface ProfileSetupJwtPayload {
+  sub: number;
+  type: 'profile_setup';
+}

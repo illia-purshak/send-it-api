@@ -23,8 +23,8 @@ export const registerBodySchema = {
 export const registerResponseSchema = {
   type: 'object',
   properties: {
-    id: { type: 'integer', example: 1 },
-    email: { type: 'string', format: 'email', nullable: true, example: 'user@example.com' },
+    requiresProfileCompletion: { type: 'boolean', example: true },
+    profileSetupToken: stringField('Short-lived token to complete profile setup', 'eyJhbGciOi...'),
   },
 };
 
@@ -92,6 +92,32 @@ export const acceptInviteBodySchema = {
   },
 };
 
+export const meResponseSchema = {
+  type: 'object',
+  properties: {
+    id: { type: 'integer', example: 1 },
+    email: { type: 'string', format: 'email', nullable: true, example: 'user@example.com' },
+    phoneNumber: { type: 'string', nullable: true, example: null },
+    role: { type: 'string', example: 'CLIENT' },
+    status: { type: 'string', example: 'INACTIVE' },
+    profileCompleted: { type: 'boolean', example: false },
+    createdAt: { type: 'string', format: 'date-time' },
+    updatedAt: { type: 'string', format: 'date-time' },
+    profile: {
+      nullable: true,
+      type: 'object',
+      properties: {
+        companyName: { type: 'string', example: 'Acme LLC' },
+        companyNameLat: { type: 'string', nullable: true, example: null },
+        edrpou: { type: 'string', example: '12345678' },
+        taxNumber: { type: 'string', nullable: true, example: null },
+        legalAddress: { type: 'string', example: 'Kyiv, Ukraine' },
+        contactPersonName: { type: 'string', nullable: true, example: null },
+      },
+    },
+  },
+};
+
 export const tokenPairResponseSchema = {
   type: 'object',
   properties: {
@@ -108,6 +134,22 @@ export const twoFactorChallengeResponseSchema = {
   },
 };
 
+export const profileSetupRequiredResponseSchema = {
+  type: 'object',
+  properties: {
+    requiresProfileCompletion: { type: 'boolean', example: true },
+    profileSetupToken: stringField('Short-lived token to complete profile setup', 'eyJhbGciOi...'),
+  },
+};
+
+export const adminSetupRequiredResponseSchema = {
+  type: 'object',
+  properties: {
+    requiresSetup: { type: 'boolean', example: true },
+    setupToken: stringField('Temporary setup token for first-time admin onboarding', 'eyJhbGciOi...'),
+  },
+};
+
 export const loginResponseSchema = {
   oneOf: [
     {
@@ -119,6 +161,22 @@ export const loginResponseSchema = {
       },
     },
     twoFactorChallengeResponseSchema,
+    profileSetupRequiredResponseSchema,
+  ],
+};
+
+export const adminLoginResponseSchema = {
+  oneOf: [
+    {
+      type: 'object',
+      properties: {
+        requires2FA: { type: 'boolean', example: false },
+        accessToken: stringField('JWT access token', 'eyJhbGciOi...'),
+        refreshToken: stringField('Refresh token', 'refresh_token_value'),
+      },
+    },
+    twoFactorChallengeResponseSchema,
+    adminSetupRequiredResponseSchema,
   ],
 };
 
@@ -189,5 +247,19 @@ export const conflictErrorSchema = {
     message: stringField('Conflict error message', 'Email already in use'),
     error: stringField('Error label', 'Conflict'),
     statusCode: { type: 'integer', example: 409 },
+  },
+};
+
+export const completeProfileBodySchema = {
+  type: 'object',
+  required: ['profileSetupToken', 'companyName', 'edrpou', 'legalAddress'],
+  properties: {
+    profileSetupToken: stringField('Profile setup token from register or login', 'eyJhbGciOi...'),
+    companyName: stringField('Legal company name', 'Acme LLC'),
+    companyNameLat: { type: 'string', nullable: true, description: 'Company name in Latin characters', example: null },
+    edrpou: stringField('8-digit EDRPOU code', '12345678'),
+    taxNumber: { type: 'string', nullable: true, description: 'Tax number (IPN)', example: null },
+    legalAddress: stringField('Legal address', 'Kyiv, Ukraine, 01001'),
+    contactPersonName: { type: 'string', nullable: true, description: 'Primary contact person name', example: 'John Doe' },
   },
 };

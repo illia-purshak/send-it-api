@@ -18,6 +18,12 @@ pnpm test:e2e         # e2e tests (test/jest-e2e.json)
 
 Single test file: `pnpm test -- --testPathPattern=auth.service`
 
+Local dev (Docker):
+```bash
+docker compose up -d      # start PostgreSQL on port 5433
+```
+Copy `.env.example` to `.env` and fill in secrets (`JWT_ACCESS_SECRET`, `JWT_PENDING_SECRET`, `TOTP_ENCRYPTION_KEY`).
+
 Prisma:
 ```bash
 pnpm prisma migrate dev   # apply migrations
@@ -52,16 +58,18 @@ Admins **cannot** self-register. Only `SUPER_ADMIN` can invite admins via `Admin
 src/
   prisma/           # PrismaService (wraps PrismaPg adapter) + PrismaModule (@Global)
   common/
-    guards/         # JwtAuthGuard (global via APP_GUARD)
-    decorators/     # @Public(), @CurrentUser()
+    guards/         # JwtAuthGuard (global via APP_GUARD), AdminJwtAuthGuard (admin routes)
+    decorators/     # @Public(), @CurrentUser(), @CurrentAdmin()
     pipes/          # ZodValidationPipe
+    swagger/        # Swagger decorators (Swagger UI at /docs)
   types/            # auth.types.ts — JwtPayload, JwtUser, PendingJwtPayload
+                    # admin-auth.types.ts — AdminJwtPayload, AdminJwtUser, AdminPendingJwtPayload, AdminSetupRequiredJwtPayload
   utils/            # crypto.util.ts — hashSha256, generateToken, encryptTotp, decryptTotp
   module/
     user/auth/      # CLIENT auth — 10 endpoints (register, login, refresh, logout, forgot/reset password, 2FA setup/enable/disable/verify)
     admin/auth/     # ADMIN/SUPER_ADMIN auth (stub — implement separately)
   validation/
-    auth/           # Zod schemas + inferred types (user.schema.ts)
+    auth/           # Zod schemas + inferred types (user.schema.ts, admin.schema.ts)
   constants/
     apiRoutes.ts    # AUTH_ROUTES constant
 generated/
@@ -87,6 +95,7 @@ Planned modules (per README): users, admin-users, subscriptions, billing, postal
 - Refresh tokens are stored as **hashes** and support revocation via `revokedAt`
 - Reset password tokens use two hashes: `tokenHash` (stored) and `tokenLookupHash` (unique index for fast lookup) with `usedAt` flag
 - TOTP 2FA: optional for `CLIENT`, mandatory for `ADMIN` (secret encrypted at rest)
+- Admin login has an extra JWT state: `setup_required` (issued on first login before 2FA is configured; distinct from `pending_2fa` which is issued after credentials verified but before TOTP code entered)
 
 ### Subscription & billing
 - Plans: `FREE` (1 operator), `PRO` (paid, level 1), `BUSINESS` (paid, level 2)
