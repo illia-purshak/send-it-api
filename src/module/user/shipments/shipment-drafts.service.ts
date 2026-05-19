@@ -57,14 +57,4 @@ export class ShipmentDraftsService {
     await this.prisma.db.shipmentDraft.delete({ where: { id } });
   }
 
-  async getDraftDuplicateData(userId: number, id: number) {
-    const draft = await this.getDraftById(userId, id);
-    return {
-      postalServiceId: draft.postalServiceId,
-      formData:
-        draft.draftData && typeof draft.draftData === 'object' && !Array.isArray(draft.draftData)
-          ? (draft.draftData as Record<string, unknown>)
-          : {},
-    };
-  }
 }

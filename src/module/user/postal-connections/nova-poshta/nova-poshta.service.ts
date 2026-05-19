@@ -19,7 +19,7 @@ export class NovaPoshtaService {
     return svc.id;
   }
 
-  async connect(userId: number, apiKey: string): Promise<void> {
+  async connect(userId: number, apiKey: string) {
     const postalServiceId = await this.getServiceId();
     const existing = await this.prisma.db.userPostalConnection.findUnique({
       where: { userId_postalServiceId: { userId, postalServiceId } },
@@ -31,12 +31,19 @@ export class NovaPoshtaService {
       });
     }
     await this.postalConnectionsService.checkOperatorLimit(userId);
-    await this.prisma.db.userPostalConnection.create({
+    return this.prisma.db.userPostalConnection.create({
       data: {
         userId,
         postalServiceId,
         apiKey: encryptTotp(apiKey),
         status: PostalConnectionStatus.ACTIVE,
+      },
+      select: {
+        id: true,
+        status: true,
+        connectedAt: true,
+        updatedAt: true,
+        postalService: { select: { id: true, name: true, slug: true, logoUrl: true } },
       },
     });
   }

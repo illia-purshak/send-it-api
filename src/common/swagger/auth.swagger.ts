@@ -92,6 +92,51 @@ export const acceptInviteBodySchema = {
   },
 };
 
+export const setPasswordBodySchema = {
+  type: 'object',
+  required: ['token', 'password'],
+  properties: {
+    token: stringField('Admin invite token', 'invite_token_value'),
+    password: stringField('Password with 8-128 characters', 'AdminPass123!'),
+  },
+};
+
+export const setup2faWithTokenBodySchema = {
+  type: 'object',
+  required: ['token'],
+  properties: {
+    token: stringField('Admin invite token', 'invite_token_value'),
+  },
+};
+
+export const verifySetup2faBodySchema = {
+  type: 'object',
+  required: ['token', 'secret', 'totpCode'],
+  properties: {
+    token: stringField('Admin invite token', 'invite_token_value'),
+    secret: stringField('Raw TOTP secret from setup step', 'JBSWY3DPEHPK3PXP'),
+    totpCode: stringField('6-digit TOTP code', '123456'),
+  },
+};
+
+export const setPasswordResponseSchema = messageResponse('Password set. Proceed to 2FA setup.');
+
+export const verifySetup2faResponseSchema = {
+  type: 'object',
+  properties: {
+    accessToken: stringField('JWT access token', 'eyJhbGciOi...'),
+    refreshToken: stringField('Refresh token', 'refresh_token_value'),
+    admin: {
+      type: 'object',
+      properties: {
+        id: { type: 'integer', example: 2 },
+        email: { type: 'string', format: 'email', example: 'admin@sendit.com' },
+        isSuperAdmin: { type: 'boolean', example: false },
+      },
+    },
+  },
+};
+
 export const meResponseSchema = {
   type: 'object',
   properties: {

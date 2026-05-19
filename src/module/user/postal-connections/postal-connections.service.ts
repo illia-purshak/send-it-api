@@ -1,28 +1,40 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { ForbiddenException, Injectable } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service.js';
-import { PostalConnectionStatus } from '../../../../generated/prisma/enums.js';
+import {
+  NotificationType,
+  PostalConnectionStatus,
+  SubscriptionBalanceStatus,
+} from '../../../../generated/prisma/enums.js';
+import { NotificationsService } from '../notifications/notifications.service.js';
 
 @Injectable()
 export class PostalConnectionsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notifications: NotificationsService,
+  ) {}
 
   async checkOperatorLimit(userId: number) {
-    const subscription = await this.prisma.db.userSubscription.findUnique({
-      where: { userId },
+    const active = await this.prisma.db.userSubscriptionBalance.findFirst({
+      where: { userId, status: SubscriptionBalanceStatus.ACTIVE },
       include: { plan: true },
     });
-    if (!subscription) throw new NotFoundException('Subscription not found');
+
+    const plan = active?.plan
+      ?? await this.prisma.db.subscriptionPlan.findFirst({ where: { level: 0, isActive: true } });
+
+    const maxOperators = plan?.maxOperators ?? 1;
 
     const activeCount = await this.prisma.db.userPostalConnection.count({
       where: { userId, status: PostalConnectionStatus.ACTIVE },
     });
 
-    if (activeCount >= subscription.plan.maxOperators) {
+    if (activeCount >= maxOperators) {
       throw new ForbiddenException({
         code: 'OPERATOR_LIMIT_REACHED',
         message: 'Upgrade your plan to connect more operators',
-        maxOperators: subscription.plan.maxOperators,
-        currentPlan: subscription.plan.level,
+        maxOperators,
+        currentPlan: plan?.level ?? 0,
       });
     }
 
@@ -49,6 +61,12 @@ export class PostalConnectionsService {
       where: { userId, postalServiceId },
       data: { status: PostalConnectionStatus.INVALID },
     });
+    await this.notifications.create(
+      userId,
+      NotificationType.POSTAL_CONNECTION,
+      'Postal connection became invalid',
+      'One of your postal operator connections is no longer valid. Please reconnect it to continue.',
+    );
   }
 
   async blockConnections(userId: number, keepIds: number[]) {

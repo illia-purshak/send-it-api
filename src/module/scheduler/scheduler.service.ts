@@ -2,11 +2,26 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import { BillingService } from '../user/billing/billing.service.js';
+import { SubscriptionService } from '../user/subscription/subscription.service.js';
 import {
-  PostalConnectionStatus,
-  SubscriptionStatus,
   DiscountType,
+  PostalConnectionStatus,
+  SubscriptionBalanceStatus,
+  SubscriptionPeriodType,
+  UserStatus,
 } from '../../../generated/prisma/enums.js';
+import { getSwitchCheckCronExpression } from '../../config/subscription.config.js';
+
+const DAYS_MONTHLY = 30;
+const DAYS_YEARLY = 365;
+const SWITCH_CHECK_CRON = getSwitchCheckCronExpression();
+
+function addDays(date: Date, days: number): Date {
+  const d = new Date(date);
+  d.setDate(d.getDate() + days);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
 
 @Injectable()
 export class SchedulerService {
@@ -15,35 +30,37 @@ export class SchedulerService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly billingService: BillingService,
+    private readonly subscriptionService: SubscriptionService,
   ) {}
 
   @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
   async processSubscriptionRenewals() {
     const now = new Date();
-    const due = await this.prisma.db.userSubscription.findMany({
+    const due = await this.prisma.db.userSubscriptionBalance.findMany({
       where: {
-        status: SubscriptionStatus.ACTIVE,
-        currentPeriodEnd: { lte: now },
+        status: SubscriptionBalanceStatus.ACTIVE,
+        autoRenew: true,
+        periodEnd: { lte: now, not: null },
       },
       include: { plan: true },
     });
 
-    for (const sub of due) {
-      const periodStart = now;
-      const periodEnd = new Date(now);
-      periodEnd.setMonth(periodEnd.getMonth() + 1);
+    for (const balance of due) {
+      const daysTotal =
+        balance.periodType === SubscriptionPeriodType.YEARLY ? DAYS_YEARLY : DAYS_MONTHLY;
+      const newPeriodEnd = addDays(balance.periodEnd!, daysTotal);
 
-      const amount = sub.customAmount
-        ? Number(sub.customAmount)
-        : Number(sub.plan.price);
+      const amount = balance.customAmount
+        ? Number(balance.customAmount)
+        : balance.periodType === SubscriptionPeriodType.YEARLY && balance.plan.priceYearly
+          ? Number(balance.plan.priceYearly)
+          : Number(balance.plan.price);
 
-      await this.prisma.db.userSubscription.update({
-        where: { id: sub.id },
+      await this.prisma.db.userSubscriptionBalance.update({
+        where: { id: balance.id },
         data: {
-          currentPeriodStart: periodStart,
-          currentPeriodEnd: periodEnd,
-          // Reset one-time discounts after use
-          ...(sub.discountType === DiscountType.ONE_TIME
+          periodEnd: newPeriodEnd,
+          ...(balance.discountType === DiscountType.ONE_TIME
             ? { customAmount: null, discountType: null }
             : {}),
         },
@@ -51,105 +68,120 @@ export class SchedulerService {
 
       if (amount > 0) {
         await this.billingService.createBillingRecord(
-          sub.userId,
-          sub.planId,
+          balance.userId,
+          balance.planId,
+          balance.id,
           amount,
-          periodStart,
-          periodEnd,
+          balance.periodType,
+          now,
+          newPeriodEnd,
         );
       }
 
-      this.logger.log(`Renewed subscription ${sub.id} for user ${sub.userId}`);
+      this.logger.log(`Renewed balance ${balance.id} for user ${balance.userId}`);
     }
   }
 
   @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
-  async activatePendingPlans() {
+  async expireSubscriptions() {
     const now = new Date();
-    const pending = await this.prisma.db.userSubscription.findMany({
+    const expired = await this.prisma.db.userSubscriptionBalance.findMany({
       where: {
-        status: {
-          in: [SubscriptionStatus.PENDING_UPGRADE, SubscriptionStatus.PENDING_DOWNGRADE],
-        },
-        currentPeriodEnd: { lte: now },
+        status: SubscriptionBalanceStatus.ACTIVE,
+        autoRenew: false,
+        periodEnd: { lte: now, not: null },
       },
-      include: { plan: true, nextPlan: true },
     });
 
-    for (const sub of pending) {
-      if (!sub.nextPlanId || !sub.nextPlan) continue;
+    for (const balance of expired) {
+      await this.prisma.db.userSubscriptionBalance.update({
+        where: { id: balance.id },
+        data: { status: SubscriptionBalanceStatus.EXPIRED },
+      });
 
-      const periodStart = now;
-      const periodEnd = new Date(now);
-      periodEnd.setMonth(periodEnd.getMonth() + 1);
+      await this.subscriptionService.activateNextInQueue(balance.userId);
+      this.logger.log(`Expired balance ${balance.id} for user ${balance.userId}`);
+    }
+  }
 
-      await this.prisma.db.userSubscription.update({
-        where: { id: sub.id },
+  @Cron(SWITCH_CHECK_CRON)
+  async activateScheduledSwitches() {
+    const now = new Date();
+    const pending = await this.prisma.db.userSubscriptionBalance.findMany({
+      where: {
+        scheduledSwitchAt: { lte: now, not: null },
+        status: SubscriptionBalanceStatus.ACTIVE,
+      },
+      include: { plan: true },
+    });
+
+    for (const activeBalance of pending) {
+      if (!activeBalance.scheduledSwitchTo) continue;
+
+      const target = await this.prisma.db.userSubscriptionBalance.findUnique({
+        where: { id: activeBalance.scheduledSwitchTo },
+        include: { plan: true },
+      });
+      if (!target) continue;
+
+      await this.prisma.db.userSubscriptionBalance.update({
+        where: { id: activeBalance.id },
         data: {
-          planId: sub.nextPlanId,
-          nextPlanId: null,
-          status: SubscriptionStatus.ACTIVE,
-          currentPeriodStart: periodStart,
-          currentPeriodEnd: periodEnd,
+          status: SubscriptionBalanceStatus.PAUSED,
+          pausedAt: now,
+          scheduledSwitchTo: null,
+          scheduledSwitchAt: null,
         },
       });
 
-      const amount = Number(sub.nextPlan.price);
-      if (amount > 0) {
-        await this.billingService.createBillingRecord(
-          sub.userId,
-          sub.nextPlanId,
-          amount,
-          periodStart,
-          periodEnd,
-        );
+      let newPeriodEnd: Date | null;
+      if (target.plan.level === 0) {
+        newPeriodEnd = null;
+      } else if (target.status === SubscriptionBalanceStatus.PAUSED && target.pausedAt && target.periodEnd) {
+        const remainingMs = target.periodEnd.getTime() - target.pausedAt.getTime();
+        newPeriodEnd = new Date(now.getTime() + remainingMs);
+        newPeriodEnd.setHours(0, 0, 0, 0);
+      } else {
+        newPeriodEnd = addDays(now, target.daysTotal);
       }
 
-      if (sub.status === SubscriptionStatus.PENDING_DOWNGRADE) {
-        await this.deactivateExcessConnections(sub.userId, sub.nextPlan.maxOperators);
-      } else {
-        await this.reactivateAllConnections(sub.userId);
-      }
+      await this.prisma.db.userSubscriptionBalance.update({
+        where: { id: target.id },
+        data: {
+          status: SubscriptionBalanceStatus.ACTIVE,
+          pausedAt: null,
+          position: 0,
+          periodEnd: newPeriodEnd,
+        },
+      });
+
+      await this.subscriptionService._applyOperatorLimits(activeBalance.userId, target.plan.maxOperators);
 
       this.logger.log(
-        `Activated pending plan ${sub.nextPlan.level} for user ${sub.userId}`,
+        `Switched balance ${activeBalance.id} -> ${target.id} for user ${activeBalance.userId}`,
       );
     }
   }
 
   @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
-  async expireCancelledSubscriptions() {
+  async deleteScheduledAccounts() {
     const now = new Date();
-    const cancelled = await this.prisma.db.userSubscription.findMany({
-      where: {
-        status: SubscriptionStatus.CANCELLED,
-        currentPeriodEnd: { lte: now },
-      },
+    const deleted = await this.prisma.db.user.deleteMany({
+      where: { status: UserStatus.DELETED, scheduledDeletionAt: { lte: now } },
     });
-
-    const freePlan = await this.prisma.db.subscriptionPlan.findUnique({
-      where: { level: 'FREE' },
-    });
-    if (!freePlan) {
-      this.logger.error('FREE plan not found — cannot expire cancelled subscriptions');
-      return;
+    if (deleted.count > 0) {
+      this.logger.log(`Hard-deleted ${deleted.count} scheduled account(s)`);
     }
+  }
 
-    for (const sub of cancelled) {
-      await this.prisma.db.userSubscription.update({
-        where: { id: sub.id },
-        data: {
-          planId: freePlan.id,
-          status: SubscriptionStatus.ACTIVE,
-          nextPlanId: null,
-          cancelledAt: null,
-          customAmount: null,
-          discountType: null,
-        },
-      });
-
-      await this.deactivateExcessConnections(sub.userId, freePlan.maxOperators);
-      this.logger.log(`Expired subscription for user ${sub.userId} → FREE`);
+  @Cron('0 2 * * *')
+  async cleanupReadNotifications() {
+    const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const deleted = await this.prisma.db.notification.deleteMany({
+      where: { isRead: true, updatedAt: { lt: cutoff } },
+    });
+    if (deleted.count > 0) {
+      this.logger.log(`Cleaned up ${deleted.count} read notification(s) older than 30 days`);
     }
   }
 
@@ -163,7 +195,7 @@ export class SchedulerService {
 
     const toDeactivate = connections.slice(maxOperators);
     await this.prisma.db.userPostalConnection.updateMany({
-      where: { id: { in: toDeactivate.map((c) => c.id) } },
+      where: { id: { in: toDeactivate.map((connection) => connection.id) } },
       data: { status: PostalConnectionStatus.BLOCKED },
     });
   }

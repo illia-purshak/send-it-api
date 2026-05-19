@@ -3,13 +3,11 @@ import {
   Controller,
   Delete,
   Get,
-  HttpCode,
   NotImplementedException,
   Param,
-  ParseIntPipe,
   Post,
-  Put,
   Query,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
@@ -21,16 +19,11 @@ import {
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
+import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard.js';
 import { CurrentUser } from '../../../common/decorators/current-user.decorator.js';
 import { ZodValidationPipe } from '../../../common/pipes/zod-validation.pipe.js';
 import { SHIPMENT_ROUTES } from '../../../constants/apiRoutes.js';
 import type { JwtUser } from '../../../types/auth.types.js';
-import {
-  SaveDraftSchema,
-  UpdateDraftSchema,
-  type SaveDraftDto,
-  type UpdateDraftDto,
-} from '../../../validation/shipments/draft.schema.js';
 import {
   ListShipmentsQuerySchema,
   type ListShipmentsQueryDto,
@@ -40,22 +33,27 @@ import {
   type CreateNovaPostShipmentDto,
 } from '../../../validation/shipments/nova-post-shipment.schema.js';
 import {
-  SaveTemplateSchema,
-  type SaveTemplateDto,
-} from '../../../validation/shipments/template.schema.js';
+  CreateUkrposhtaShipmentSchema,
+  type CreateUkrposhtaShipmentDto,
+} from '../../../validation/shipments/ukrposhta-shipment.schema.js';
+import {
+  CreateMeestShipmentSchema,
+  type CreateMeestShipmentDto,
+} from '../../../validation/shipments/meest-shipment.schema.js';
 import { NovaPostShipmentsService } from './nova-post-shipments.service.js';
-import { ShipmentDraftsService } from './shipment-drafts.service.js';
+import { UkrposhtaShipmentsService } from './ukrposhta-shipments.service.js';
+import { MeestShipmentsService } from './meest-shipments.service.js';
 import { ShipmentReadService } from './shipment-read.service.js';
-import { ShipmentTemplatesService } from './shipment-templates.service.js';
 
 @ApiTags('Shipments')
 @ApiBearerAuth('bearer')
+@UseGuards(JwtAuthGuard)
 @Controller(SHIPMENT_ROUTES.BASE)
 export class ShipmentsController {
   constructor(
-    private readonly draftsService: ShipmentDraftsService,
-    private readonly templatesService: ShipmentTemplatesService,
     private readonly novaPostService: NovaPostShipmentsService,
+    private readonly ukrposhtaService: UkrposhtaShipmentsService,
+    private readonly meestService: MeestShipmentsService,
     private readonly shipmentReadService: ShipmentReadService,
   ) {}
 
@@ -71,124 +69,20 @@ export class ShipmentsController {
     return this.shipmentReadService.getUnifiedShipments(user.id, query);
   }
 
-  @Get(SHIPMENT_ROUTES.DRAFTS)
-  @ApiOperation({ summary: 'List all drafts for the current user' })
-  @ApiOkResponse({ description: 'List of drafts' })
+  @Get(SHIPMENT_ROUTES.NOVA_POSHTA)
+  @ApiOperation({ summary: 'Fetch Nova Poshta shipments only' })
+  @ApiOkResponse({ description: 'Nova Poshta shipments list' })
   @ApiUnauthorizedResponse()
-  getDrafts(@CurrentUser() user: JwtUser) {
-    return this.draftsService.getDrafts(user.id);
-  }
-
-  @Get(SHIPMENT_ROUTES.DRAFT_DUPLICATE)
-  @ApiOperation({ summary: 'Get draft data formatted for form prefilling' })
-  @ApiOkResponse({ description: 'Draft data for duplication' })
-  @ApiUnauthorizedResponse()
-  @ApiNotFoundResponse()
-  getDraftDuplicateData(
-    @CurrentUser() user: JwtUser,
-    @Param('id', ParseIntPipe) id: number,
-  ) {
-    return this.draftsService.getDraftDuplicateData(user.id, id);
-  }
-
-  @Get(SHIPMENT_ROUTES.DRAFT_BY_ID)
-  @ApiOperation({ summary: 'Get a single draft by ID' })
-  @ApiOkResponse({ description: 'Draft record' })
-  @ApiUnauthorizedResponse()
-  @ApiNotFoundResponse()
-  getDraftById(
-    @CurrentUser() user: JwtUser,
-    @Param('id', ParseIntPipe) id: number,
-  ) {
-    return this.draftsService.getDraftById(user.id, id);
-  }
-
-  @Post(SHIPMENT_ROUTES.DRAFTS)
-  @ApiOperation({ summary: 'Save a new draft' })
-  @ApiCreatedResponse({ description: 'Draft created' })
-  @ApiUnauthorizedResponse()
-  @ApiBadRequestResponse()
-  saveDraft(
-    @CurrentUser() user: JwtUser,
-    @Body(new ZodValidationPipe(SaveDraftSchema)) dto: SaveDraftDto,
-  ) {
-    return this.draftsService.saveDraft(user.id, dto);
-  }
-
-  @Put(SHIPMENT_ROUTES.DRAFT_BY_ID)
-  @ApiOperation({ summary: 'Update an existing draft' })
-  @ApiOkResponse({ description: 'Draft updated' })
-  @ApiUnauthorizedResponse()
-  @ApiNotFoundResponse()
-  @ApiBadRequestResponse()
-  updateDraft(
-    @CurrentUser() user: JwtUser,
-    @Param('id', ParseIntPipe) id: number,
-    @Body(new ZodValidationPipe(UpdateDraftSchema)) dto: UpdateDraftDto,
-  ) {
-    return this.draftsService.updateDraft(user.id, id, dto);
-  }
-
-  @Delete(SHIPMENT_ROUTES.DRAFT_BY_ID)
-  @HttpCode(204)
-  @ApiOperation({ summary: 'Delete a draft' })
-  @ApiOkResponse({ description: 'Draft deleted' })
-  @ApiUnauthorizedResponse()
-  @ApiNotFoundResponse()
-  deleteDraft(
-    @CurrentUser() user: JwtUser,
-    @Param('id', ParseIntPipe) id: number,
-  ) {
-    return this.draftsService.deleteDraft(user.id, id);
-  }
-
-  @Get(SHIPMENT_ROUTES.TEMPLATES)
-  @ApiOperation({ summary: 'List all saved templates for the current user' })
-  @ApiOkResponse({ description: 'List of templates' })
-  @ApiUnauthorizedResponse()
-  getTemplates(@CurrentUser() user: JwtUser) {
-    return this.templatesService.getTemplates(user.id);
-  }
-
-  @Post(SHIPMENT_ROUTES.TEMPLATES)
-  @ApiOperation({ summary: 'Save current form state as a reusable template' })
-  @ApiCreatedResponse({ description: 'Template saved' })
-  @ApiUnauthorizedResponse()
-  @ApiBadRequestResponse()
-  saveTemplate(
-    @CurrentUser() user: JwtUser,
-    @Body(new ZodValidationPipe(SaveTemplateSchema)) dto: SaveTemplateDto,
-  ) {
-    return this.templatesService.saveTemplate(user.id, dto);
-  }
-
-  @Delete(SHIPMENT_ROUTES.TEMPLATE_BY_ID)
-  @HttpCode(204)
-  @ApiOperation({ summary: 'Delete a saved template' })
-  @ApiOkResponse({ description: 'Template deleted' })
-  @ApiUnauthorizedResponse()
-  @ApiNotFoundResponse()
-  deleteTemplate(
-    @CurrentUser() user: JwtUser,
-    @Param('id', ParseIntPipe) id: number,
-  ) {
-    return this.templatesService.deleteTemplate(user.id, id);
-  }
-
-  @Get(SHIPMENT_ROUTES.NOVA_POST)
-  @ApiOperation({ summary: 'Fetch Nova Post shipments only' })
-  @ApiOkResponse({ description: 'Nova Post shipments list' })
-  @ApiUnauthorizedResponse()
-  getNovaPostShipments(@CurrentUser() user: JwtUser) {
+  getNovaPoshtaShipments(@CurrentUser() user: JwtUser) {
     return this.shipmentReadService.getNovaPostShipments(user.id);
   }
 
-  @Post(SHIPMENT_ROUTES.NOVA_POST)
-  @ApiOperation({ summary: 'Create a shipment via Nova Post API' })
+  @Post(SHIPMENT_ROUTES.NOVA_POSHTA)
+  @ApiOperation({ summary: 'Create a shipment via Nova Poshta API' })
   @ApiCreatedResponse({ description: 'Shipment created - returns TTN and metadata' })
   @ApiUnauthorizedResponse()
   @ApiBadRequestResponse({ description: 'Validation error or CONNECTION_INVALID' })
-  createNovaPostShipment(
+  createNovaPoshtaShipment(
     @CurrentUser() user: JwtUser,
     @Body(new ZodValidationPipe(CreateNovaPostShipmentSchema))
     dto: CreateNovaPostShipmentDto,
@@ -196,17 +90,12 @@ export class ShipmentsController {
     return this.novaPostService.createShipment(user.id, dto);
   }
 
-  @Get(SHIPMENT_ROUTES.NOVA_POST_DUPLICATE)
-  @ApiOperation({
-    summary: 'Get Nova Post shipment data for form prefilling',
-  })
-  @ApiOkResponse({ description: 'Form-relevant fields from shipment' })
+  @Get(SHIPMENT_ROUTES.OPERATORS)
+  @ApiOperation({ summary: 'List postal operators the user has connections for' })
+  @ApiOkResponse({ description: 'Operator list for the shipment filter select' })
   @ApiUnauthorizedResponse()
-  getNovaPostDuplicateData(
-    @CurrentUser() user: JwtUser,
-    @Param('ttn') ttn: string,
-  ) {
-    return this.novaPostService.getShipmentDuplicateData(user.id, ttn);
+  getShipmentOperators(@CurrentUser() user: JwtUser) {
+    return this.shipmentReadService.getOperatorsForUser(user.id);
   }
 
   @Get(SHIPMENT_ROUTES.DETAIL_BY_OPERATOR_REF)
@@ -222,13 +111,83 @@ export class ShipmentsController {
     return this.shipmentReadService.getShipmentDetail(user.id, operator, ref);
   }
 
-  @Post(SHIPMENT_ROUTES.UKRPOSHTA)
-  @ApiOperation({ summary: 'Placeholder endpoint for future Ukrposhta shipment creation' })
+  @Delete(SHIPMENT_ROUTES.NOVA_POSHTA_DETAIL)
+  @ApiOperation({ summary: 'Delete a Nova Post shipment by TTN' })
+  @ApiOkResponse({ description: 'Shipment deleted - returns deletedAt timestamp' })
+  @ApiNotFoundResponse({ description: 'Shipment not found or service unavailable' })
   @ApiUnauthorizedResponse()
-  createUkrposhtaShipment() {
-    throw new NotImplementedException(
-      'Ukrposhta shipment integration is not implemented yet.',
-    );
+  @ApiBadRequestResponse({ description: 'CONNECTION_INVALID' })
+  deleteNovaPoshtaShipment(
+    @CurrentUser() user: JwtUser,
+    @Param('ref') ref: string,
+  ) {
+    return this.novaPostService.deleteShipment(user.id, ref);
+  }
+
+  @Get(SHIPMENT_ROUTES.UKRPOSHTA)
+  @ApiOperation({ summary: 'Fetch Ukrposhta shipments only' })
+  @ApiOkResponse({ description: 'Ukrposhta shipments list' })
+  @ApiUnauthorizedResponse()
+  getUkrposhtaShipments(@CurrentUser() user: JwtUser) {
+    return this.shipmentReadService.getUkrposhtaShipments(user.id);
+  }
+
+  @Post(SHIPMENT_ROUTES.UKRPOSHTA)
+  @ApiOperation({ summary: 'Create a mock Ukrposhta shipment' })
+  @ApiCreatedResponse({ description: 'Shipment created — returns TTN and metadata' })
+  @ApiUnauthorizedResponse()
+  @ApiBadRequestResponse({ description: 'Validation error' })
+  createUkrposhtaShipment(
+    @CurrentUser() user: JwtUser,
+    @Body(new ZodValidationPipe(CreateUkrposhtaShipmentSchema))
+    dto: CreateUkrposhtaShipmentDto,
+  ) {
+    return this.ukrposhtaService.createShipment(user.id, dto);
+  }
+
+  @Delete(SHIPMENT_ROUTES.UKRPOSHTA_DETAIL)
+  @ApiOperation({ summary: 'Delete a mock Ukrposhta shipment by TTN' })
+  @ApiOkResponse({ description: 'Shipment deleted — returns deletedAt timestamp' })
+  @ApiNotFoundResponse({ description: 'Shipment not found' })
+  @ApiUnauthorizedResponse()
+  deleteUkrposhtaShipment(
+    @CurrentUser() user: JwtUser,
+    @Param('ref') ref: string,
+  ) {
+    return this.ukrposhtaService.deleteShipment(user.id, ref);
+  }
+
+  @Get(SHIPMENT_ROUTES.MEEST)
+  @ApiOperation({ summary: 'Fetch Meest Express shipments only' })
+  @ApiOkResponse({ description: 'Meest Express shipments list' })
+  @ApiUnauthorizedResponse()
+  getMeestShipments(@CurrentUser() user: JwtUser) {
+    return this.shipmentReadService.getMeestShipments(user.id);
+  }
+
+  @Post(SHIPMENT_ROUTES.MEEST)
+  @ApiOperation({ summary: 'Create a mock Meest Express shipment' })
+  @ApiCreatedResponse({ description: 'Shipment created — returns TTN and metadata' })
+  @ApiUnauthorizedResponse()
+  @ApiBadRequestResponse({ description: 'Validation error' })
+  createMeestShipment(
+    @CurrentUser() user: JwtUser,
+    @Body(new ZodValidationPipe(CreateMeestShipmentSchema))
+    dto: CreateMeestShipmentDto,
+  ) {
+    return this.meestService.createShipment(user.id, dto);
+  }
+
+  @Delete(SHIPMENT_ROUTES.MEEST_DETAIL)
+  @ApiOperation({ summary: 'Delete a mock Meest Express shipment by TTN' })
+  @ApiOkResponse({ description: 'Shipment deleted — returns deletedAt timestamp' })
+  @ApiNotFoundResponse({ description: 'Shipment not found' })
+  @ApiUnauthorizedResponse()
+  deleteMeestShipment(
+    @CurrentUser() user: JwtUser,
+    @Param('ref') ref: string,
+  ) {
+    return this.meestService.deleteShipment(user.id, ref);
   }
 
   @Post(SHIPMENT_ROUTES.MIST)

@@ -5,9 +5,11 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service.js';
 import {
-  SubscriptionStatus,
   DiscountType,
+  PostalConnectionStatus,
+  SubscriptionBalanceStatus,
 } from '../../../../generated/prisma/enums.js';
+import { buildPaginatedResponse } from '../../../utils/pagination.util.js';
 import type { AdminGetSubscriptionsQueryDto } from '../../../validation/subscription/subscription.schema.js';
 
 @Injectable()
@@ -15,11 +17,11 @@ export class AdminSubscriptionService {
   constructor(private readonly prisma: PrismaService) {}
 
   async getAll(query: AdminGetSubscriptionsQueryDto) {
-    const { page, limit, plan, status, search } = query;
+    const { page, limit, level, status, search } = query;
     const skip = (page - 1) * limit;
 
     const where: Record<string, unknown> = {};
-    if (plan) where['plan'] = { level: plan };
+    if (level !== undefined) where['plan'] = { level };
     if (status) where['status'] = status;
     if (search) {
       where['user'] = {
@@ -28,102 +30,121 @@ export class AdminSubscriptionService {
     }
 
     const [data, total] = await Promise.all([
-      this.prisma.db.userSubscription.findMany({
+      this.prisma.db.userSubscriptionBalance.findMany({
         where,
         skip,
         take: limit,
         orderBy: { createdAt: 'desc' },
         include: {
           plan: true,
-          nextPlan: true,
           user: { select: { id: true, email: true, profile: { select: { companyName: true } } } },
         },
       }),
-      this.prisma.db.userSubscription.count({ where }),
+      this.prisma.db.userSubscriptionBalance.count({ where }),
     ]);
 
-    return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
+    return buildPaginatedResponse(data, total, page, limit);
   }
 
-  async changePlan(userId: number, planId: number) {
-    const [user, targetPlan] = await Promise.all([
-      this.prisma.db.user.findUnique({
-        where: { id: userId },
-        include: { subscription: { include: { plan: true } } },
-      }),
-      this.prisma.db.subscriptionPlan.findUnique({ where: { id: planId } }),
-    ]);
+  async getById(balanceId: number) {
+    const balance = await this.prisma.db.userSubscriptionBalance.findUnique({
+      where: { id: balanceId },
+      include: {
+        plan: true,
+        user: { select: { id: true, email: true, profile: { select: { companyName: true } } } },
+      },
+    });
+    if (!balance) throw new NotFoundException('Subscription balance not found');
+    return balance;
+  }
 
-    if (!user) throw new NotFoundException('User not found');
-    if (!user.subscription) throw new NotFoundException('Subscription not found');
-    if (!targetPlan || !targetPlan.isActive) throw new BadRequestException('Invalid plan');
+  async changePlan(balanceId: number, planId: number) {
+    const balance = await this.prisma.db.userSubscriptionBalance.findUnique({
+      where: { id: balanceId },
+    });
+    if (!balance) throw new NotFoundException('Subscription balance not found');
 
-    const now = new Date();
-    const periodEnd = new Date(now);
-    periodEnd.setMonth(periodEnd.getMonth() + 1);
+    const targetPlan = await this.prisma.db.subscriptionPlan.findUnique({ where: { id: planId } });
+    if (!targetPlan || !targetPlan.isActive) throw new BadRequestException('Invalid or inactive plan');
 
-    return this.prisma.db.userSubscription.update({
-      where: { userId },
+    const updated = await this.prisma.db.userSubscriptionBalance.update({
+      where: { id: balanceId },
       data: {
         planId,
-        status: SubscriptionStatus.ACTIVE,
-        nextPlanId: null,
-        cancelledAt: null,
-        currentPeriodStart: now,
-        currentPeriodEnd: periodEnd,
         customAmount: null,
         discountType: null,
       },
-      include: { plan: true, nextPlan: true },
+      include: { plan: true },
     });
-  }
 
-  async extendSubscription(userId: number) {
-    const subscription = await this.prisma.db.userSubscription.findUnique({
-      where: { userId },
-    });
-    if (!subscription) throw new NotFoundException('Subscription not found');
-
-    const newEnd = new Date(subscription.currentPeriodEnd);
-    newEnd.setMonth(newEnd.getMonth() + 1);
-
-    return this.prisma.db.userSubscription.update({
-      where: { userId },
-      data: { currentPeriodEnd: newEnd },
-      include: { plan: true, nextPlan: true },
-    });
-  }
-
-  async forceCancel(userId: number) {
-    const subscription = await this.prisma.db.userSubscription.findUnique({
-      where: { userId },
-    });
-    if (!subscription) throw new NotFoundException('Subscription not found');
-    if (subscription.status === SubscriptionStatus.CANCELLED) {
-      throw new BadRequestException('Subscription is already cancelled');
+    if (balance.status === SubscriptionBalanceStatus.ACTIVE) {
+      await this.applyOperatorLimits(balance.userId, targetPlan.maxOperators);
     }
 
-    return this.prisma.db.userSubscription.update({
-      where: { userId },
-      data: {
-        status: SubscriptionStatus.CANCELLED,
-        cancelledAt: new Date(),
-        nextPlanId: null,
-      },
-      include: { plan: true, nextPlan: true },
+    return updated;
+  }
+
+  async extendBalance(balanceId: number, days: number) {
+    const balance = await this.prisma.db.userSubscriptionBalance.findUnique({
+      where: { id: balanceId },
+    });
+    if (!balance) throw new NotFoundException('Subscription balance not found');
+
+    const currentEnd = balance.periodEnd ?? new Date();
+    const newEnd = new Date(currentEnd);
+    newEnd.setDate(newEnd.getDate() + days);
+
+    return this.prisma.db.userSubscriptionBalance.update({
+      where: { id: balanceId },
+      data: { periodEnd: newEnd, daysTotal: balance.daysTotal + days },
+      include: { plan: true },
     });
   }
 
-  async setDiscount(userId: number, amount: number, discountType: DiscountType) {
-    const subscription = await this.prisma.db.userSubscription.findUnique({
-      where: { userId },
+  async cancelBalance(balanceId: number) {
+    const balance = await this.prisma.db.userSubscriptionBalance.findUnique({
+      where: { id: balanceId },
     });
-    if (!subscription) throw new NotFoundException('Subscription not found');
+    if (!balance) throw new NotFoundException('Subscription balance not found');
+    if (!balance.autoRenew) throw new BadRequestException('Subscription is already cancelled');
 
-    return this.prisma.db.userSubscription.update({
-      where: { userId },
-      data: { customAmount: amount, discountType },
-      include: { plan: true, nextPlan: true },
+    return this.prisma.db.userSubscriptionBalance.update({
+      where: { id: balanceId },
+      data: { autoRenew: false },
+      include: { plan: true },
     });
+  }
+
+  async setDiscount(balanceId: number, amount: number, discountType: DiscountType) {
+    const balance = await this.prisma.db.userSubscriptionBalance.findUnique({
+      where: { id: balanceId },
+    });
+    if (!balance) throw new NotFoundException('Subscription balance not found');
+
+    return this.prisma.db.userSubscriptionBalance.update({
+      where: { id: balanceId },
+      data: { customAmount: amount, discountType },
+      include: { plan: true },
+    });
+  }
+
+  private async applyOperatorLimits(userId: number, maxOperators: number) {
+    const activeConnections = await this.prisma.db.userPostalConnection.findMany({
+      where: { userId, status: PostalConnectionStatus.ACTIVE },
+      orderBy: { connectedAt: 'asc' },
+    });
+
+    if (activeConnections.length > maxOperators) {
+      const toBlock = activeConnections.slice(maxOperators);
+      await this.prisma.db.userPostalConnection.updateMany({
+        where: { id: { in: toBlock.map((c) => c.id) } },
+        data: { status: PostalConnectionStatus.BLOCKED },
+      });
+    } else {
+      await this.prisma.db.userPostalConnection.updateMany({
+        where: { userId, status: PostalConnectionStatus.BLOCKED },
+        data: { status: PostalConnectionStatus.ACTIVE },
+      });
+    }
   }
 }

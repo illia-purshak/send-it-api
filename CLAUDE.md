@@ -38,11 +38,12 @@ pnpm prisma studio        # GUI for DB
 ### Tech stack
 - NestJS 11 + TypeScript
 - PostgreSQL + Prisma 7 (`provider = "prisma-client"`, requires `@prisma/adapter-pg` + `pg` at runtime)
-- Prisma client generated to `generated/prisma/` at project root (not `src/`); import as `../../generated/prisma/client.js`
-- `PrismaService` wraps the client — access models via `prismaService.db.user`, `.db.refreshToken`, etc.
+- Prisma client generated to `generated/prisma/` at project root (not `src/`); import as `../../generated/prisma/client.js` (or `../../../generated/prisma/enums.js` for enums)
+- `PrismaService` wraps the client — access models via `prismaService.db.user`, `.db.shipmentTemplate`, etc.
 - Zod for validation schemas (`src/validation/`); `class-validator` / `class-transformer` also available
 - `otplib 13.x` uses functional API: `import { generateSecret, generateURI, verifySync } from 'otplib'` (no `authenticator` object)
 - All relative imports must use `.js` extension (`module: nodenext`)
+- Swagger UI at `/docs`
 
 ### Role model (critical — two separate DB tables)
 | Role | Table | Notes |
@@ -51,7 +52,7 @@ pnpm prisma studio        # GUI for DB
 | `ADMIN` | `Admin` | Invited by SUPER_ADMIN; 2FA mandatory |
 | `SUPER_ADMIN` | `Admin` | All ADMIN rights + admin management; 2FA not required |
 
-Admins **cannot** self-register. Only `SUPER_ADMIN` can invite admins via `AdminInvite` (email + token with TTL).
+Admins **cannot** self-register. Only `SUPER_ADMIN` can invite admins via `AdminInvite` (email + token with TTL of 7 days). `AdminInvite.token` stores a hash of the raw token.
 
 ### Module layout
 ```
@@ -61,17 +62,35 @@ src/
     guards/         # JwtAuthGuard (global via APP_GUARD), AdminJwtAuthGuard (admin routes)
     decorators/     # @Public(), @CurrentUser(), @CurrentAdmin()
     pipes/          # ZodValidationPipe
-    swagger/        # Swagger decorators (Swagger UI at /docs)
+    swagger/        # Swagger decorators
   types/            # auth.types.ts — JwtPayload, JwtUser, PendingJwtPayload
                     # admin-auth.types.ts — AdminJwtPayload, AdminJwtUser, AdminPendingJwtPayload, AdminSetupRequiredJwtPayload
   utils/            # crypto.util.ts — hashSha256, generateToken, encryptTotp, decryptTotp
   module/
-    user/auth/      # CLIENT auth — 10 endpoints (register, login, refresh, logout, forgot/reset password, 2FA setup/enable/disable/verify)
-    admin/auth/     # ADMIN/SUPER_ADMIN auth (stub — implement separately)
-  validation/
-    auth/           # Zod schemas + inferred types (user.schema.ts, admin.schema.ts)
+    user/
+      auth/         # CLIENT auth — register, login, refresh, logout, forgot/reset password, 2FA setup/enable/disable/verify
+      profile/      # GET/PATCH user profile + PATCH settings (language, timezone, notifications)
+      billing/      # GET billing history, POST mock payment card
+      subscription/ # GET plans, GET current subscription, POST upgrade/downgrade/cancel
+      postal-connections/  # GET connections, check limit; nova-post/ subdirectory for operator-specific connect
+      shipments/    # GET unified list + GET/POST by operator (ShipmentReadService, NovaPostShipmentsService, ShipmentDraftsService)
+      drafts/       # CRUD for ShipmentDraft (controller delegates to ShipmentDraftsService in shipments/)
+      templates/    # CRUD for ShipmentTemplate + POST :id/increment-usage
+      recipients/   # CRUD for Recipient (address book)
+      notifications/ # GET list, GET unread-count, PATCH :id (mark read), DELETE :id
+      onboarding/   # GET checklist (completion status of onboarding steps)
+    admin/
+      auth/         # ADMIN auth — validate-invite, register, login, 2FA, refresh, logout
+      profile/      # GET/PATCH admin profile + PATCH settings
+      subscription/ # GET subscriptions list, GET/PATCH :id (admin view of user subscriptions)
+      users/        # GET users list, GET :id, POST restore, DELETE :id (soft delete)
+      admins/       # GET admins list, GET :id, POST invite, PATCH :id status, DELETE :id
+      services/     # GET/POST/PATCH/DELETE postal services (admin registry)
+      support/      # GET/POST support tickets + messages
+    scheduler/      # @Cron jobs: subscription renewal, plan activation, expiry → FREE downgrade
+  validation/       # Zod schemas organised by domain (auth/, profile/, templates/, recipients/, etc.)
   constants/
-    apiRoutes.ts    # AUTH_ROUTES constant
+    apiRoutes.ts    # All route constants (AUTH_ROUTES, SHIPMENT_ROUTES, TEMPLATE_ROUTES, etc.)
 generated/
   prisma/           # Auto-generated Prisma 7 TypeScript client (never edit manually)
 ```
@@ -79,31 +98,41 @@ generated/
 ### Validation pattern
 ZodValidationPipe at param level — no global ValidationPipe:
 ```typescript
-@Post(AUTH_ROUTES.REGISTER)
-register(@Body(new ZodValidationPipe(RegisterSchema)) dto: RegisterDto) { ... }
+@Post(TEMPLATE_ROUTES.BASE)
+create(@Body(new ZodValidationPipe(CreateTemplateSchema)) dto: CreateTemplateDto) { ... }
 ```
 
 ### Token hashing convention
 - Refresh tokens: store `hashSha256(rawToken)` in DB
 - Reset password: `tokenLookupHash = hashSha256('lookup:' + raw)`, `tokenHash = hashSha256('verify:' + raw)`
+- Admin invite token: store `hashSha256(rawToken)` in `AdminInvite.token`
 - TOTP secrets: AES-256-CBC encrypted with `TOTP_ENCRYPTION_KEY` env var (64 hex chars = 32 bytes)
-
-Planned modules (per README): users, admin-users, subscriptions, billing, postal-connections, shipment-templates, recipients, notifications, support, admin-services, analytics.
+- Postal API keys (`UserPostalConnection.apiKey`): AES-256-CBC encrypted — decrypt only when making outbound operator API calls
 
 ### Auth design
 - JWT with separate refresh token tables (`RefreshToken` for users, `AdminRefreshToken` for admins)
-- Refresh tokens are stored as **hashes** and support revocation via `revokedAt`
-- Reset password tokens use two hashes: `tokenHash` (stored) and `tokenLookupHash` (unique index for fast lookup) with `usedAt` flag
+- Refresh tokens stored as hashes, support revocation via `revokedAt`
+- Reset password uses two hashes: `tokenHash` (stored) and `tokenLookupHash` (unique index) with `usedAt` flag
 - TOTP 2FA: optional for `CLIENT`, mandatory for `ADMIN` (secret encrypted at rest)
-- Admin login has an extra JWT state: `setup_required` (issued on first login before 2FA is configured; distinct from `pending_2fa` which is issued after credentials verified but before TOTP code entered)
+- Admin login has an extra JWT state: `setup_required` (first login before 2FA configured) vs `pending_2fa` (credentials verified, awaiting TOTP code)
 
 ### Subscription & billing
-- Plans: `FREE` (1 operator), `PRO` (paid, level 1), `BUSINESS` (paid, level 2)
-- Plan changes take effect at the start of the next billing period (`nextPlanId` on `UserSubscription`)
-- `UserPostalConnection` enforces `@@unique([userId, postalServiceId])` — one connection per operator per user
+- Plans: `FREE` (1 operator), `PRO`, `BUSINESS` — stored in `SubscriptionPlan` table with `maxOperators`
+- Plan changes take effect at billing period boundary (`nextPlanId` on `UserSubscription`); statuses: `ACTIVE`, `PENDING_UPGRADE`, `PENDING_DOWNGRADE`, `CANCELLED`
+- `SchedulerService` runs nightly crons: renew active subs, activate pending plan changes, expire cancelled subs → downgrade to FREE; on downgrade, deactivates excess `UserPostalConnection` rows (oldest kept)
 - Billing/payments are **mock** (educational project, no real payment processor)
+- `DiscountType.ONE_TIME` discounts are cleared after the first renewal
+
+### Shipments architecture
+- `ShipmentReadService` — aggregates live operator data + local drafts into a unified list; delegates to operator-specific services
+- `NovaPostShipmentsService` — calls Nova Poshta API using the user's decrypted API key; maps raw statuses via `shipment-status.mapper.ts`
+- `ShipmentDraftsService` — CRUD for `ShipmentDraft` (stored locally as JSON blob); shared between `DraftsModule` and `ShipmentsModule`
+- Unified list merges operator shipments + drafts, applies filters, sorts by `createdAt` desc
+- `ShipmentStatus` enum: `DRAFT | CREATED | PREPARING | IN_TRANSIT | DELIVERED | CANCELLED | RETURNED | UNKNOWN`
+- Action flags (`canEdit`, `canCancel`, `canDuplicate`) derived from normalized status in `shipment-status.mapper.ts`
 
 ### Postal operator connections
-- `PostalService` is the admin-managed registry of available operators
-- `UserPostalConnection.apiKey` is encrypted — decrypt only when making outbound operator API calls
-- Client flow: profile page → connect operator → use in shipment creation stepper
+- `PostalService` is the admin-managed registry of available operators (slug, name, logoUrl)
+- `PostalConnectionsService` enforces operator limit based on subscription plan; marks connections `INVALID` when API key fails
+- `@@unique([userId, postalServiceId])` — one connection per operator per user
+- Connection statuses: `ACTIVE`, `BLOCKED` (over plan limit), `INVALID` (bad API key)

@@ -1,7 +1,6 @@
 import {
   BadRequestException,
   ConflictException,
-  ForbiddenException,
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
@@ -18,7 +17,6 @@ import {
   encryptTotp,
   decryptTotp,
 } from '../../../utils/crypto.util.js';
-import { AdminRole } from '../../../../generated/prisma/enums.js';
 import type {
   AdminJwtPayload,
   AdminJwtUser,
@@ -26,7 +24,9 @@ import type {
   AdminSetupRequiredJwtPayload,
 } from '../../../types/admin-auth.types.js';
 import type {
-  AcceptInviteDto,
+  SetPasswordDto,
+  Setup2faWithTokenDto,
+  VerifySetup2faDto,
   AdminLoginDto,
   AdminVerify2faDto,
   AdminRefreshDto,
@@ -49,12 +49,12 @@ export class AdminAuthService {
   private issueAccessToken(admin: {
     id: number;
     email: string;
-    role: AdminRole;
+    isSuperAdmin: boolean;
   }): string {
     const payload: AdminJwtPayload = {
       sub: admin.id,
       email: admin.email,
-      role: admin.role,
+      isSuperAdmin: admin.isSuperAdmin,
       entityType: 'admin',
       type: 'access',
     };
@@ -87,12 +87,12 @@ export class AdminAuthService {
   private issueSetupToken(admin: {
     id: number;
     email: string;
-    role: AdminRole;
+    isSuperAdmin: boolean;
   }): string {
     const payload: AdminSetupRequiredJwtPayload = {
       sub: admin.id,
       email: admin.email,
-      role: admin.role,
+      isSuperAdmin: admin.isSuperAdmin,
       entityType: 'admin',
       type: 'setup_required',
     };
@@ -105,52 +105,103 @@ export class AdminAuthService {
   private async issueTokenPair(admin: {
     id: number;
     email: string;
-    role: AdminRole;
+    isSuperAdmin: boolean;
   }): Promise<{ accessToken: string; refreshToken: string }> {
     const accessToken = this.issueAccessToken(admin);
     const refreshToken = await this.issueRefreshToken(admin.id);
     return { accessToken, refreshToken };
   }
 
-  async acceptInvite(dto: AcceptInviteDto): Promise<{ setupToken: string }> {
-    const tokenHash = hashSha256(dto.token);
-
+  private async findValidInvite(rawToken: string) {
+    const tokenHash = hashSha256(rawToken);
     const invite = await this.prisma.db.adminInvite.findUnique({
       where: { token: tokenHash },
+      include: { admin: true },
     });
+    if (!invite) throw new BadRequestException('Invite token is invalid');
+    if (invite.usedAt) throw new BadRequestException('Invite token has already been used');
+    if (invite.expiresAt < new Date()) throw new BadRequestException('Invite token has expired');
+    return invite;
+  }
 
-    if (!invite || invite.usedAt || invite.expiresAt < new Date()) {
-      throw new BadRequestException('Invalid or expired invite token');
-    }
+  async validateInvite(rawToken: string): Promise<{ email: string; valid: true }> {
+    const invite = await this.findValidInvite(rawToken);
+    return { email: invite.admin.email, valid: true };
+  }
 
-    const existing = await this.prisma.db.admin.findUnique({
-      where: { email: invite.email },
-    });
-    if (existing) {
-      throw new ConflictException('Admin with this email already exists');
+  async setPassword(dto: SetPasswordDto): Promise<{ message: string }> {
+    const invite = await this.findValidInvite(dto.token);
+
+    if (invite.admin.status !== 'PENDING') {
+      throw new BadRequestException('Admin account is not in a pending state');
     }
 
     const passwordHash = await bcrypt.hash(dto.password, BCRYPT_ROUNDS);
-    const admin = await this.prisma.db.admin.create({
-      data: {
-        email: invite.email,
-        firstName: dto.firstName,
-        lastName: dto.lastName,
-        role: AdminRole.ADMIN,
-        status: 'INACTIVE',
-        invitedById: invite.invitedById,
-      },
+    await this.prisma.db.adminCredentials.upsert({
+      where: { adminId: invite.adminId },
+      create: { adminId: invite.adminId, passwordHash },
+      update: { passwordHash },
     });
-    await this.prisma.db.adminCredentials.create({
-      data: { adminId: admin.id, passwordHash },
+
+    return { message: 'Password set. Proceed to 2FA setup.' };
+  }
+
+  async setup2faWithToken(
+    dto: Setup2faWithTokenDto,
+  ): Promise<{ qrCodeUrl: string; secret: string }> {
+    const invite = await this.findValidInvite(dto.token);
+
+    const secret = generateSecret();
+    const otpAuthUrl = generateURI({
+      issuer: 'SendIt',
+      label: invite.admin.email,
+      secret,
     });
+    const qrCodeUrl = await QRCode.toDataURL(otpAuthUrl);
+
+    return { qrCodeUrl, secret };
+  }
+
+  async verifySetupWithToken(dto: VerifySetup2faDto): Promise<{
+    accessToken: string;
+    refreshToken: string;
+    admin: { id: number; email: string; isSuperAdmin: boolean };
+  }> {
+    const invite = await this.findValidInvite(dto.token);
+
+    const isValid = verifySync({ token: dto.totpCode, secret: dto.secret });
+    if (!isValid) {
+      throw new BadRequestException('Invalid TOTP code');
+    }
+
+    const encryptedSecret = encryptTotp(dto.secret);
+
+    await this.prisma.db.adminTwoFactorAuth.upsert({
+      where: { adminId: invite.adminId },
+      create: { adminId: invite.adminId, secret: encryptedSecret, isEnabled: true },
+      update: { secret: encryptedSecret, isEnabled: true },
+    });
+
+    await this.prisma.db.admin.update({
+      where: { id: invite.adminId },
+      data: { status: 'ACTIVE' },
+    });
+
     await this.prisma.db.adminInvite.update({
       where: { id: invite.id },
       data: { usedAt: new Date() },
     });
 
-    const setupToken = this.issueSetupToken(admin);
-    return { setupToken };
+    const tokens = await this.issueTokenPair(invite.admin);
+
+    return {
+      ...tokens,
+      admin: {
+        id: invite.admin.id,
+        email: invite.admin.email,
+        isSuperAdmin: invite.admin.isSuperAdmin,
+      },
+    };
   }
 
   async login(
@@ -181,13 +232,14 @@ export class AdminAuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    if (admin.role === AdminRole.SUPER_ADMIN) {
+    if (admin.isSuperAdmin) {
       if (admin.status !== 'ACTIVE') {
-        throw new ForbiddenException('Account is inactive');
+        throw new UnauthorizedException('Account is inactive');
       }
       const tokens = await this.issueTokenPair(admin);
       return { requires2FA: false, ...tokens };
     }
+
     if (admin.status !== 'ACTIVE' || !admin.twoFactorAuth?.isEnabled) {
       return {
         requiresSetup: true,
@@ -229,8 +281,8 @@ export class AdminAuthService {
     }
 
     const secret = decryptTotp(admin.twoFactorAuth.secret);
-    const result = verifySync({ token: dto.totpCode, secret });
-    if (!result.valid) throw new UnauthorizedException('Invalid TOTP code');
+    const isValid = verifySync({ token: dto.totpCode, secret });
+    if (!isValid) throw new UnauthorizedException('Invalid TOTP code');
 
     return this.issueTokenPair(admin);
   }
@@ -312,8 +364,8 @@ export class AdminAuthService {
     }
 
     const secret = decryptTotp(record.secret);
-    const result = verifySync({ token: dto.totpCode, secret });
-    if (!result.valid) throw new UnauthorizedException('Invalid TOTP code');
+    const isValid = verifySync({ token: dto.totpCode, secret });
+    if (!isValid) throw new UnauthorizedException('Invalid TOTP code');
 
     await this.prisma.db.adminTwoFactorAuth.update({
       where: { adminId: admin.id },
@@ -327,7 +379,7 @@ export class AdminAuthService {
     return this.issueTokenPair({
       id: admin.id,
       email: admin.email,
-      role: admin.role,
+      isSuperAdmin: admin.isSuperAdmin,
     });
   }
 
@@ -343,8 +395,8 @@ export class AdminAuthService {
     }
 
     const secret = decryptTotp(record.secret);
-    const result = verifySync({ token: dto.totpCode, secret });
-    if (!result.valid) throw new UnauthorizedException('Invalid TOTP code');
+    const isValid = verifySync({ token: dto.totpCode, secret });
+    if (!isValid) throw new UnauthorizedException('Invalid TOTP code');
 
     await this.prisma.db.adminTwoFactorAuth.update({
       where: { adminId: admin.id },

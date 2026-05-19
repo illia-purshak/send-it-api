@@ -1,9 +1,7 @@
-import { AdminRole } from '../../generated/prisma/enums.js';
-
 export interface AdminJwtPayload {
   sub: number;
   email: string;
-  role: AdminRole;
+  isSuperAdmin: boolean;
   entityType: 'admin';
   type: 'access';
 }
@@ -11,7 +9,7 @@ export interface AdminJwtPayload {
 export interface AdminJwtUser {
   id: number;
   email: string;
-  role: AdminRole;
+  isSuperAdmin: boolean;
   type: 'access' | 'setup_required';
 }
 
@@ -24,7 +22,7 @@ export interface AdminPendingJwtPayload {
 export interface AdminSetupRequiredJwtPayload {
   sub: number;
   email: string;
-  role: AdminRole;
+  isSuperAdmin: boolean;
   entityType: 'admin';
   type: 'setup_required';
 }

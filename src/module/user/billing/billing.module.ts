@@ -1,8 +1,10 @@
 import { Module } from '@nestjs/common';
+import { UserAuthModule } from '../auth/auth.module.js';
 import { BillingController } from './billing.controller.js';
 import { BillingService } from './billing.service.js';
 
 @Module({
+  imports: [UserAuthModule],
   controllers: [BillingController],
   providers: [BillingService],
   exports: [BillingService],
