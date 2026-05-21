@@ -3,7 +3,7 @@ FROM node:22-alpine AS builder
 WORKDIR /app
 RUN npm install -g pnpm@9
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-RUN pnpm install --frozen-lockfile --config.unsafe-perm=true
+RUN pnpm install --config.unsafe-perm=true
 COPY . .
 RUN pnpm prisma generate
 RUN pnpm build
@@ -13,7 +13,7 @@ FROM node:22-alpine AS runner
 WORKDIR /app
 RUN npm install -g pnpm@9
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-RUN pnpm install --frozen-lockfile --config.unsafe-perm=true
+RUN pnpm install --config.unsafe-perm=true
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/generated ./generated
 COPY prisma ./prisma
