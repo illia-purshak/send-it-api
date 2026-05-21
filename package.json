@@ -74,11 +74,6 @@
   "prisma": {
     "seed": "tsx prisma/seed.ts"
   },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "bcrypt"
-    ]
-  },
   "jest": {
     "moduleFileExtensions": [
       "js",
