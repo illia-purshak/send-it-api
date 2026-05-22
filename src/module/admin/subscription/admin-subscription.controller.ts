@@ -31,11 +31,11 @@ import { DiscountType } from '../../../../generated/prisma/enums.js';
 @ApiTags('Admin Subscriptions')
 @ApiBearerAuth('bearer')
 @UseGuards(AdminJwtAuthGuard)
-@Controller(ADMIN_SUBSCRIPTION_ROUTES.BASE)
+@Controller()
 export class AdminSubscriptionController {
   constructor(private readonly adminSubscriptionService: AdminSubscriptionService) {}
 
-  @Get()
+  @Get(ADMIN_SUBSCRIPTION_ROUTES.BASE)
   @ApiOkResponse({ description: 'Paginated list of all subscription balances' })
   @ApiUnauthorizedResponse()
   getAll(

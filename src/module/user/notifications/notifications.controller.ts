@@ -35,11 +35,11 @@ import { NotificationsService } from './notifications.service.js';
 @ApiTags('Notifications')
 @ApiBearerAuth('bearer')
 @UseGuards(JwtAuthGuard)
-@Controller(NOTIFICATION_ROUTES.BASE)
+@Controller()
 export class NotificationsController {
   constructor(private readonly notificationsService: NotificationsService) {}
 
-  @Get()
+  @Get(NOTIFICATION_ROUTES.BASE)
   @ApiOperation({ summary: 'Fetch notifications for the current user' })
   @ApiOkResponse({ description: 'Notifications list' })
   @ApiUnauthorizedResponse()
@@ -71,7 +71,7 @@ export class NotificationsController {
     return this.notificationsService.markAsRead(user.id, id);
   }
 
-  @Put()
+  @Put(NOTIFICATION_ROUTES.BASE)
   @ApiOperation({ summary: 'Mark all unread notifications as read' })
   @ApiOkResponse({ description: 'Number of updated notifications' })
   @ApiUnauthorizedResponse()
@@ -93,7 +93,7 @@ export class NotificationsController {
     return this.notificationsService.deleteOne(user.id, id);
   }
 
-  @Delete()
+  @Delete(NOTIFICATION_ROUTES.BASE)
   @HttpCode(204)
   @ApiOperation({ summary: 'Bulk delete notifications — all or read-only (filter=read)' })
   @ApiNoContentResponse({ description: 'Notifications deleted' })

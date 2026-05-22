@@ -43,11 +43,11 @@ import { AdminAdminsService } from './admin-admins.service.js';
 @ApiTags('Admin — Admins')
 @ApiBearerAuth('bearer')
 @UseGuards(AdminJwtAuthGuard)
-@Controller(ADMIN_ADMINS_ROUTES.BASE)
+@Controller()
 export class AdminAdminsController {
   constructor(private readonly adminAdminsService: AdminAdminsService) {}
 
-  @Get()
+  @Get(ADMIN_ADMINS_ROUTES.BASE)
   @UseGuards(SuperAdminGuard)
   @ApiOperation({ summary: 'Paginated list of all admins (SUPER_ADMIN only)' })
   @ApiOkResponse({ description: 'Admins list' })

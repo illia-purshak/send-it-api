@@ -43,11 +43,11 @@ import { RequireFeature } from '../../../common/decorators/require-feature.decor
 @ApiTags('Templates')
 @ApiBearerAuth('bearer')
 @UseGuards(JwtAuthGuard)
-@Controller(TEMPLATE_ROUTES.BASE)
+@Controller()
 export class TemplatesController {
   constructor(private readonly templatesService: TemplatesService) {}
 
-  @Get()
+  @Get(TEMPLATE_ROUTES.BASE)
   @ApiOperation({ summary: 'List templates with optional filters and search' })
   @ApiOkResponse({ description: 'Template list' })
   @ApiUnauthorizedResponse()
@@ -73,7 +73,7 @@ export class TemplatesController {
 
   @UseGuards(FeatureGuard)
   @RequireFeature('hasTemplates')
-  @Post()
+  @Post(TEMPLATE_ROUTES.BASE)
   @ApiOperation({ summary: 'Create a new template' })
   @ApiCreatedResponse({ description: 'Template created' })
   @ApiUnauthorizedResponse()

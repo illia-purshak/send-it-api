@@ -25,14 +25,14 @@ import { POSTAL_ROUTES } from '../../../../constants/apiRoutes.js';
 @ApiTags('Postal Connections')
 @ApiBearerAuth('bearer')
 @UseGuards(JwtAuthGuard)
-@Controller(POSTAL_ROUTES.BASE)
+@Controller()
 export class NovaPostAuthController {
   constructor(
     private readonly novaPostAuthService: NovaPostAuthService,
     private readonly postalConnectionsService: PostalConnectionsService,
   ) {}
 
-  @Post(`${POSTAL_ROUTES.NOVA_POST_BASE}/${POSTAL_ROUTES.NOVA_POST_REQUEST_KEY}`)
+  @Post(POSTAL_ROUTES.NOVA_POST_REQUEST_KEY)
   @HttpCode(HttpStatus.OK)
   @ApiOkResponse({ description: 'API key retrieved from Nova Post sandbox' })
   @ApiBadRequestResponse({ description: 'Invalid phone or phone not registered in EBC, or rate limited' })
@@ -43,7 +43,7 @@ export class NovaPostAuthController {
     return this.novaPostAuthService.requestApiKey(dto.phone);
   }
 
-  @Post(`${POSTAL_ROUTES.NOVA_POST_BASE}/${POSTAL_ROUTES.NOVA_POST_CONNECT}`)
+  @Post(POSTAL_ROUTES.NOVA_POST_CONNECT)
   @HttpCode(HttpStatus.CREATED)
   @ApiCreatedResponse({ description: 'Nova Post connected successfully' })
   @ApiBadRequestResponse({ description: 'Invalid API key' })

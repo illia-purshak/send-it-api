@@ -29,6 +29,7 @@ import {
   type UpdateSettingsDto,
 } from '../../../validation/profile/profile.schema.js';
 import { ProfileService } from './profile.service.js';
+import { PROFILE_ROUTES, USERS_ROUTES } from '../../../constants/apiRoutes.js';
 
 @ApiTags('Profile')
 @ApiBearerAuth('bearer')
@@ -37,7 +38,7 @@ import { ProfileService } from './profile.service.js';
 export class ProfileController {
   constructor(private readonly profileService: ProfileService) {}
 
-  @Get('profile')
+  @Get(PROFILE_ROUTES.BASE)
   @ApiOperation({ summary: 'Fetch the authenticated user\'s full profile' })
   @ApiOkResponse({ description: 'User profile' })
   @ApiUnauthorizedResponse()
@@ -45,7 +46,7 @@ export class ProfileController {
     return this.profileService.getProfile(user.id);
   }
 
-  @Put('profile')
+  @Put(PROFILE_ROUTES.BASE)
   @ApiOperation({ summary: 'Update organization data' })
   @ApiOkResponse({ description: 'Updated profile' })
   @ApiUnauthorizedResponse()
@@ -56,7 +57,7 @@ export class ProfileController {
     return this.profileService.updateProfile(user.id, dto);
   }
 
-  @Put('profile/settings')
+  @Put(PROFILE_ROUTES.SETTINGS)
   @ApiOperation({ summary: 'Update app settings and notification preferences' })
   @ApiOkResponse({ description: 'Updated settings' })
   @ApiUnauthorizedResponse()
@@ -67,7 +68,7 @@ export class ProfileController {
     return this.profileService.updateSettings(user.id, dto);
   }
 
-  @Delete('users/me')
+  @Delete(USERS_ROUTES.ME)
   @HttpCode(204)
   @ApiOperation({ summary: 'Schedule account deletion (30-day grace period)' })
   @ApiNoContentResponse({ description: 'Account scheduled for deletion' })
@@ -76,7 +77,7 @@ export class ProfileController {
     return this.profileService.scheduleDelete(user.id);
   }
 
-  @Post('users/me/restore')
+  @Post(USERS_ROUTES.ME_RESTORE)
   @HttpCode(200)
   @ApiOperation({ summary: 'Cancel a pending account deletion' })
   @ApiOkResponse({ description: 'Deletion cancelled' })

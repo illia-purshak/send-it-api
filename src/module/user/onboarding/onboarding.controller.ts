@@ -14,7 +14,7 @@ import { ONBOARDING_ROUTES } from '../../../constants/apiRoutes.js';
 @ApiTags('Onboarding')
 @ApiBearerAuth('bearer')
 @UseGuards(JwtAuthGuard)
-@Controller(ONBOARDING_ROUTES.BASE)
+@Controller()
 export class OnboardingController {
   constructor(private readonly onboardingService: OnboardingService) {}
 

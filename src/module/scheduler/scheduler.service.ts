@@ -35,153 +35,178 @@ export class SchedulerService {
 
   @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
   async processSubscriptionRenewals() {
-    const now = new Date();
-    const due = await this.prisma.db.userSubscriptionBalance.findMany({
-      where: {
-        status: SubscriptionBalanceStatus.ACTIVE,
-        autoRenew: true,
-        periodEnd: { lte: now, not: null },
-      },
-      include: { plan: true },
-    });
-
-    for (const balance of due) {
-      const daysTotal =
-        balance.periodType === SubscriptionPeriodType.YEARLY ? DAYS_YEARLY : DAYS_MONTHLY;
-      const newPeriodEnd = addDays(balance.periodEnd!, daysTotal);
-
-      const amount = balance.customAmount
-        ? Number(balance.customAmount)
-        : balance.periodType === SubscriptionPeriodType.YEARLY && balance.plan.priceYearly
-          ? Number(balance.plan.priceYearly)
-          : Number(balance.plan.price);
-
-      await this.prisma.db.userSubscriptionBalance.update({
-        where: { id: balance.id },
-        data: {
-          periodEnd: newPeriodEnd,
-          ...(balance.discountType === DiscountType.ONE_TIME
-            ? { customAmount: null, discountType: null }
-            : {}),
+    try {
+      const now = new Date();
+      const due = await this.prisma.db.userSubscriptionBalance.findMany({
+        where: {
+          status: SubscriptionBalanceStatus.ACTIVE,
+          autoRenew: true,
+          periodEnd: { lte: now, not: null },
         },
+        include: { plan: true },
       });
 
-      if (amount > 0) {
-        await this.billingService.createBillingRecord(
-          balance.userId,
-          balance.planId,
-          balance.id,
-          amount,
-          balance.periodType,
-          now,
-          newPeriodEnd,
-        );
-      }
+      for (const balance of due) {
+        const daysTotal =
+          balance.periodType === SubscriptionPeriodType.YEARLY ? DAYS_YEARLY : DAYS_MONTHLY;
+        const newPeriodEnd = addDays(balance.periodEnd!, daysTotal);
 
-      this.logger.log(`Renewed balance ${balance.id} for user ${balance.userId}`);
+        const amount = balance.customAmount
+          ? Number(balance.customAmount)
+          : balance.periodType === SubscriptionPeriodType.YEARLY && balance.plan.priceYearly
+            ? Number(balance.plan.priceYearly)
+            : Number(balance.plan.price);
+
+        await this.prisma.db.userSubscriptionBalance.update({
+          where: { id: balance.id },
+          data: {
+            periodEnd: newPeriodEnd,
+            ...(balance.discountType === DiscountType.ONE_TIME
+              ? { customAmount: null, discountType: null }
+              : {}),
+          },
+        });
+
+        if (amount > 0) {
+          await this.billingService.createBillingRecord(
+            balance.userId,
+            balance.planId,
+            balance.id,
+            amount,
+            balance.periodType,
+            now,
+            newPeriodEnd,
+          );
+        }
+
+        this.logger.log(`Renewed balance ${balance.id} for user ${balance.userId}`);
+      }
+    } catch (err) {
+      if ((err as any).code === 'ECONNREFUSED') return;
+      this.logger.error(`processSubscriptionRenewals failed: ${(err as any).code ?? (err as Error).message?.split('\n')[0]}`);
     }
   }
 
   @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
   async expireSubscriptions() {
-    const now = new Date();
-    const expired = await this.prisma.db.userSubscriptionBalance.findMany({
-      where: {
-        status: SubscriptionBalanceStatus.ACTIVE,
-        autoRenew: false,
-        periodEnd: { lte: now, not: null },
-      },
-    });
-
-    for (const balance of expired) {
-      await this.prisma.db.userSubscriptionBalance.update({
-        where: { id: balance.id },
-        data: { status: SubscriptionBalanceStatus.EXPIRED },
+    try {
+      const now = new Date();
+      const expired = await this.prisma.db.userSubscriptionBalance.findMany({
+        where: {
+          status: SubscriptionBalanceStatus.ACTIVE,
+          autoRenew: false,
+          periodEnd: { lte: now, not: null },
+        },
       });
 
-      await this.subscriptionService.activateNextInQueue(balance.userId);
-      this.logger.log(`Expired balance ${balance.id} for user ${balance.userId}`);
+      for (const balance of expired) {
+        await this.prisma.db.userSubscriptionBalance.update({
+          where: { id: balance.id },
+          data: { status: SubscriptionBalanceStatus.EXPIRED },
+        });
+
+        await this.subscriptionService.activateNextInQueue(balance.userId);
+        this.logger.log(`Expired balance ${balance.id} for user ${balance.userId}`);
+      }
+    } catch (err) {
+      if ((err as any).code === 'ECONNREFUSED') return;
+      this.logger.error(`expireSubscriptions failed: ${(err as any).code ?? (err as Error).message?.split('\n')[0]}`);
     }
   }
 
   @Cron(SWITCH_CHECK_CRON)
   async activateScheduledSwitches() {
-    const now = new Date();
-    const pending = await this.prisma.db.userSubscriptionBalance.findMany({
-      where: {
-        scheduledSwitchAt: { lte: now, not: null },
-        status: SubscriptionBalanceStatus.ACTIVE,
-      },
-      include: { plan: true },
-    });
-
-    for (const activeBalance of pending) {
-      if (!activeBalance.scheduledSwitchTo) continue;
-
-      const target = await this.prisma.db.userSubscriptionBalance.findUnique({
-        where: { id: activeBalance.scheduledSwitchTo },
+    try {
+      const now = new Date();
+      const pending = await this.prisma.db.userSubscriptionBalance.findMany({
+        where: {
+          scheduledSwitchAt: { lte: now, not: null },
+          status: SubscriptionBalanceStatus.ACTIVE,
+        },
         include: { plan: true },
       });
-      if (!target) continue;
 
-      await this.prisma.db.userSubscriptionBalance.update({
-        where: { id: activeBalance.id },
-        data: {
-          status: SubscriptionBalanceStatus.PAUSED,
-          pausedAt: now,
-          scheduledSwitchTo: null,
-          scheduledSwitchAt: null,
-        },
-      });
+      for (const activeBalance of pending) {
+        if (!activeBalance.scheduledSwitchTo) continue;
 
-      let newPeriodEnd: Date | null;
-      if (target.plan.level === 0) {
-        newPeriodEnd = null;
-      } else if (target.status === SubscriptionBalanceStatus.PAUSED && target.pausedAt && target.periodEnd) {
-        const remainingMs = target.periodEnd.getTime() - target.pausedAt.getTime();
-        newPeriodEnd = new Date(now.getTime() + remainingMs);
-        newPeriodEnd.setHours(0, 0, 0, 0);
-      } else {
-        newPeriodEnd = addDays(now, target.daysTotal);
+        const target = await this.prisma.db.userSubscriptionBalance.findUnique({
+          where: { id: activeBalance.scheduledSwitchTo },
+          include: { plan: true },
+        });
+        if (!target) continue;
+
+        await this.prisma.db.userSubscriptionBalance.update({
+          where: { id: activeBalance.id },
+          data: {
+            status: SubscriptionBalanceStatus.PAUSED,
+            pausedAt: now,
+            scheduledSwitchTo: null,
+            scheduledSwitchAt: null,
+          },
+        });
+
+        let newPeriodEnd: Date | null;
+        if (target.plan.level === 0) {
+          newPeriodEnd = null;
+        } else if (target.status === SubscriptionBalanceStatus.PAUSED && target.pausedAt && target.periodEnd) {
+          const remainingMs = target.periodEnd.getTime() - target.pausedAt.getTime();
+          newPeriodEnd = new Date(now.getTime() + remainingMs);
+          newPeriodEnd.setHours(0, 0, 0, 0);
+        } else {
+          newPeriodEnd = addDays(now, target.daysTotal);
+        }
+
+        await this.prisma.db.userSubscriptionBalance.update({
+          where: { id: target.id },
+          data: {
+            status: SubscriptionBalanceStatus.ACTIVE,
+            pausedAt: null,
+            position: 0,
+            periodEnd: newPeriodEnd,
+          },
+        });
+
+        await this.subscriptionService._applyOperatorLimits(activeBalance.userId, target.plan.maxOperators);
+
+        this.logger.log(
+          `Switched balance ${activeBalance.id} -> ${target.id} for user ${activeBalance.userId}`,
+        );
       }
-
-      await this.prisma.db.userSubscriptionBalance.update({
-        where: { id: target.id },
-        data: {
-          status: SubscriptionBalanceStatus.ACTIVE,
-          pausedAt: null,
-          position: 0,
-          periodEnd: newPeriodEnd,
-        },
-      });
-
-      await this.subscriptionService._applyOperatorLimits(activeBalance.userId, target.plan.maxOperators);
-
-      this.logger.log(
-        `Switched balance ${activeBalance.id} -> ${target.id} for user ${activeBalance.userId}`,
-      );
+    } catch (err) {
+      if ((err as any).code === 'ECONNREFUSED') return;
+      this.logger.error(`activateScheduledSwitches failed: ${(err as any).code ?? (err as Error).message?.split('\n')[0]}`);
     }
   }
 
   @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
   async deleteScheduledAccounts() {
-    const now = new Date();
-    const deleted = await this.prisma.db.user.deleteMany({
-      where: { status: UserStatus.DELETED, scheduledDeletionAt: { lte: now } },
-    });
-    if (deleted.count > 0) {
-      this.logger.log(`Hard-deleted ${deleted.count} scheduled account(s)`);
+    try {
+      const now = new Date();
+      const deleted = await this.prisma.db.user.deleteMany({
+        where: { status: UserStatus.DELETED, scheduledDeletionAt: { lte: now } },
+      });
+      if (deleted.count > 0) {
+        this.logger.log(`Hard-deleted ${deleted.count} scheduled account(s)`);
+      }
+    } catch (err) {
+      if ((err as any).code === 'ECONNREFUSED') return;
+      this.logger.error(`deleteScheduledAccounts failed: ${(err as any).code ?? (err as Error).message?.split('\n')[0]}`);
     }
   }
 
   @Cron('0 2 * * *')
   async cleanupReadNotifications() {
-    const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-    const deleted = await this.prisma.db.notification.deleteMany({
-      where: { isRead: true, updatedAt: { lt: cutoff } },
-    });
-    if (deleted.count > 0) {
-      this.logger.log(`Cleaned up ${deleted.count} read notification(s) older than 30 days`);
+    try {
+      const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+      const deleted = await this.prisma.db.notification.deleteMany({
+        where: { isRead: true, updatedAt: { lt: cutoff } },
+      });
+      if (deleted.count > 0) {
+        this.logger.log(`Cleaned up ${deleted.count} read notification(s) older than 30 days`);
+      }
+    } catch (err) {
+      if ((err as any).code === 'ECONNREFUSED') return;
+      this.logger.error(`cleanupReadNotifications failed: ${(err as any).code ?? (err as Error).message?.split('\n')[0]}`);
     }
   }
 

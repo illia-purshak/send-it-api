@@ -40,7 +40,7 @@ import { AdminSupportService } from './admin-support.service.js';
 @ApiTags('Admin — Support')
 @ApiBearerAuth('bearer')
 @UseGuards(AdminJwtAuthGuard)
-@Controller(ADMIN_SUPPORT_ROUTES.BASE)
+@Controller()
 export class AdminSupportController {
   constructor(private readonly adminSupportService: AdminSupportService) {}
 

@@ -46,7 +46,7 @@ import { PostalConnectionStatus } from '../../../../../generated/prisma/enums.js
 @ApiTags('Postal Connections')
 @ApiBearerAuth('bearer')
 @UseGuards(JwtAuthGuard)
-@Controller(POSTAL_ROUTES.BASE)
+@Controller()
 export class NovaPoshtaController {
   constructor(
     private readonly novaPoshtaService: NovaPoshtaService,

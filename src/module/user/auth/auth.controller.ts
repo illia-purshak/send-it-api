@@ -66,7 +66,7 @@ import {
 
 @ApiTags('User Auth')
 @UseGuards(JwtAuthGuard)
-@Controller(AUTH_ROUTES.BASE)
+@Controller()
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 

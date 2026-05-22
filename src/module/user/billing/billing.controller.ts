@@ -35,11 +35,11 @@ import { BILLING_ROUTES } from '../../../constants/apiRoutes.js';
 @ApiTags('Billing')
 @ApiBearerAuth('bearer')
 @UseGuards(JwtAuthGuard)
-@Controller(BILLING_ROUTES.BASE)
+@Controller()
 export class BillingController {
   constructor(private readonly billingService: BillingService) {}
 
-  @Get()
+  @Get(BILLING_ROUTES.BASE)
   @ApiOkResponse({ description: 'Paginated billing history' })
   @ApiUnauthorizedResponse()
   getHistory(

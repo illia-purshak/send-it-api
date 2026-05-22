@@ -36,7 +36,7 @@ import { SUBSCRIPTION_ROUTES } from '../../../constants/apiRoutes.js';
 @ApiTags('Subscriptions')
 @ApiBearerAuth('bearer')
 @UseGuards(JwtAuthGuard)
-@Controller(SUBSCRIPTION_ROUTES.BASE)
+@Controller()
 export class SubscriptionController {
   constructor(private readonly subscriptionService: SubscriptionService) {}
 
@@ -54,7 +54,7 @@ export class SubscriptionController {
     return this.subscriptionService.getMySubscriptions(user.id);
   }
 
-  @Post()
+  @Post(SUBSCRIPTION_ROUTES.BASE)
   @ApiCreatedResponse({ description: 'Subscription purchased' })
   @ApiUnauthorizedResponse()
   @ApiBadRequestResponse()

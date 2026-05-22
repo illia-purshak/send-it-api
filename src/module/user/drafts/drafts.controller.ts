@@ -37,11 +37,11 @@ import { ShipmentDraftsService } from '../shipments/shipment-drafts.service.js';
 @ApiTags('Drafts')
 @ApiBearerAuth('bearer')
 @UseGuards(JwtAuthGuard)
-@Controller(DRAFT_ROUTES.BASE)
+@Controller()
 export class DraftsController {
   constructor(private readonly draftsService: ShipmentDraftsService) {}
 
-  @Get()
+  @Get(DRAFT_ROUTES.BASE)
   @ApiOperation({ summary: 'List all drafts for the current user' })
   @ApiOkResponse({ description: 'List of drafts' })
   @ApiUnauthorizedResponse()
@@ -62,7 +62,7 @@ export class DraftsController {
     return this.draftsService.getDraftById(user.id, id);
   }
 
-  @Post()
+  @Post(DRAFT_ROUTES.BASE)
   @ApiOperation({ summary: 'Save a new draft' })
   @ApiCreatedResponse({ description: 'Draft created' })
   @ApiUnauthorizedResponse()

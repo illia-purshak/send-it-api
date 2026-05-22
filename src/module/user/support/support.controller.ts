@@ -39,7 +39,7 @@ import { SupportService } from './support.service.js';
 @ApiTags('Support')
 @ApiBearerAuth('bearer')
 @UseGuards(JwtAuthGuard)
-@Controller(SUPPORT_ROUTES.BASE)
+@Controller()
 export class SupportController {
   constructor(private readonly supportService: SupportService) {}
 

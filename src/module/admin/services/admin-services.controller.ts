@@ -35,11 +35,11 @@ import { AdminServicesService } from './admin-services.service.js';
 @ApiTags('Admin — Services')
 @ApiBearerAuth('bearer')
 @UseGuards(AdminJwtAuthGuard)
-@Controller(ADMIN_SERVICES_ROUTES.BASE)
+@Controller()
 export class AdminServicesController {
   constructor(private readonly adminServicesService: AdminServicesService) {}
 
-  @Get()
+  @Get(ADMIN_SERVICES_ROUTES.BASE)
   @ApiOperation({ summary: 'List all postal services in the system' })
   @ApiOkResponse({ description: 'Services list' })
   @ApiUnauthorizedResponse()
@@ -56,7 +56,7 @@ export class AdminServicesController {
     return this.adminServicesService.getById(id);
   }
 
-  @Post()
+  @Post(ADMIN_SERVICES_ROUTES.BASE)
   @ApiOperation({ summary: 'Add a new postal operator to the system catalogue' })
   @ApiCreatedResponse({ description: 'Service created' })
   @ApiConflictResponse({ description: 'Name or slug already taken' })

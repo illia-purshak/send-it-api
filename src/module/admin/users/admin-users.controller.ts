@@ -30,11 +30,11 @@ import { AdminUsersService } from './admin-users.service.js';
 @ApiTags('Admin — Users')
 @ApiBearerAuth('bearer')
 @UseGuards(AdminJwtAuthGuard)
-@Controller(ADMIN_USERS_ROUTES.BASE)
+@Controller()
 export class AdminUsersController {
   constructor(private readonly adminUsersService: AdminUsersService) {}
 
-  @Get()
+  @Get(ADMIN_USERS_ROUTES.BASE)
   @ApiOperation({ summary: 'Paginated list of all client accounts' })
   @ApiOkResponse({ description: 'User list' })
   @ApiUnauthorizedResponse()

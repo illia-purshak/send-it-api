@@ -33,7 +33,7 @@ import { POSTAL_ROUTES } from '../../../../constants/apiRoutes.js';
 @ApiTags('Postal Connections')
 @ApiBearerAuth('bearer')
 @UseGuards(JwtAuthGuard)
-@Controller(POSTAL_ROUTES.BASE)
+@Controller()
 export class MeestController {
   constructor(private readonly meestService: MeestService) {}
 

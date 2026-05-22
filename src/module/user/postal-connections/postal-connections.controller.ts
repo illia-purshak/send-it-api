@@ -9,11 +9,11 @@ import { POSTAL_ROUTES } from '../../../constants/apiRoutes.js';
 @ApiTags('Postal Connections')
 @ApiBearerAuth('bearer')
 @UseGuards(JwtAuthGuard)
-@Controller(POSTAL_ROUTES.BASE)
+@Controller()
 export class PostalConnectionsController {
   constructor(private readonly postalConnectionsService: PostalConnectionsService) {}
 
-  @Get()
+  @Get(POSTAL_ROUTES.BASE)
   @ApiOkResponse({ description: 'All connections for the current user (all statuses)' })
   @ApiUnauthorizedResponse()
   getAll(@CurrentUser() user: JwtUser) {

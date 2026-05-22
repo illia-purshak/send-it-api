@@ -48,7 +48,7 @@ import { ShipmentReadService } from './shipment-read.service.js';
 @ApiTags('Shipments')
 @ApiBearerAuth('bearer')
 @UseGuards(JwtAuthGuard)
-@Controller(SHIPMENT_ROUTES.BASE)
+@Controller()
 export class ShipmentsController {
   constructor(
     private readonly novaPostService: NovaPostShipmentsService,
@@ -57,7 +57,7 @@ export class ShipmentsController {
     private readonly shipmentReadService: ShipmentReadService,
   ) {}
 
-  @Get()
+  @Get(SHIPMENT_ROUTES.BASE)
   @ApiOperation({ summary: 'Fetch unified shipments list across operators and drafts' })
   @ApiOkResponse({ description: 'Unified shipments list' })
   @ApiUnauthorizedResponse()

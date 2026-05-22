@@ -22,11 +22,11 @@ import { AdminProfileService } from './profile.service.js';
 @ApiTags('Admin Profile')
 @ApiBearerAuth('bearer')
 @UseGuards(AdminJwtAuthGuard)
-@Controller(ADMIN_PROFILE_ROUTES.BASE)
+@Controller()
 export class AdminProfileController {
   constructor(private readonly profileService: AdminProfileService) {}
 
-  @Get()
+  @Get(ADMIN_PROFILE_ROUTES.BASE)
   @ApiOperation({ summary: 'Fetch the authenticated admin\'s profile' })
   @ApiOkResponse({ description: 'Admin profile' })
   @ApiUnauthorizedResponse()
@@ -34,7 +34,7 @@ export class AdminProfileController {
     return this.profileService.getProfile(admin.id);
   }
 
-  @Put()
+  @Put(ADMIN_PROFILE_ROUTES.BASE)
   @ApiOperation({ summary: 'Update admin personal info (firstName, lastName, avatarUrl)' })
   @ApiOkResponse({ description: 'Updated admin profile' })
   @ApiUnauthorizedResponse()

@@ -36,11 +36,11 @@ import { ADMIN_PLAN_ROUTES } from '../../../constants/apiRoutes.js';
 @ApiTags('Admin Plans')
 @ApiBearerAuth('bearer')
 @UseGuards(AdminJwtAuthGuard)
-@Controller(ADMIN_PLAN_ROUTES.BASE)
+@Controller()
 export class AdminPlansController {
   constructor(private readonly adminPlansService: AdminPlansService) {}
 
-  @Get()
+  @Get(ADMIN_PLAN_ROUTES.BASE)
   @ApiOkResponse({ description: 'Paginated list of subscription plans' })
   @ApiUnauthorizedResponse()
   getAll(
@@ -57,7 +57,7 @@ export class AdminPlansController {
     return this.adminPlansService.getById(id);
   }
 
-  @Post()
+  @Post(ADMIN_PLAN_ROUTES.BASE)
   @ApiCreatedResponse({ description: 'Plan created' })
   @ApiUnauthorizedResponse()
   @ApiBadRequestResponse()

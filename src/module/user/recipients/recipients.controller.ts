@@ -43,11 +43,11 @@ import { RequireFeature } from '../../../common/decorators/require-feature.decor
 @ApiTags('Recipients')
 @ApiBearerAuth('bearer')
 @UseGuards(JwtAuthGuard)
-@Controller(RECIPIENT_ROUTES.BASE)
+@Controller()
 export class RecipientsController {
   constructor(private readonly recipientsService: RecipientsService) {}
 
-  @Get()
+  @Get(RECIPIENT_ROUTES.BASE)
   @ApiOperation({ summary: 'List all recipients with optional filters' })
   @ApiOkResponse({ description: 'Recipient list' })
   @ApiUnauthorizedResponse()
@@ -73,7 +73,7 @@ export class RecipientsController {
 
   @UseGuards(FeatureGuard)
   @RequireFeature('hasRecipients')
-  @Post()
+  @Post(RECIPIENT_ROUTES.BASE)
   @ApiOperation({ summary: 'Create a new recipient' })
   @ApiCreatedResponse({ description: 'Recipient created' })
   @ApiUnauthorizedResponse()

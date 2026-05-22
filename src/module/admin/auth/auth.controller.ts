@@ -66,7 +66,7 @@ import {
 } from '../../../common/swagger/auth.swagger.js';
 
 @ApiTags('Admin Auth')
-@Controller(ADMIN_AUTH_ROUTES.BASE)
+@Controller()
 export class AdminAuthController {
   constructor(private readonly adminAuthService: AdminAuthService) {}
 
