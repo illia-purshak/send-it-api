@@ -17,6 +17,8 @@ RUN pnpm install --config.unsafe-perm=true
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/generated ./generated
 COPY prisma ./prisma
+COPY prisma.config.ts ./prisma.config.ts
+COPY tsconfig.json ./tsconfig.json
 COPY entrypoint.sh ./entrypoint.sh
 RUN chmod +x entrypoint.sh
 ENV NODE_ENV=production
