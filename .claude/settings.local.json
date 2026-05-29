@@ -1,6 +1,12 @@
 {
   "permissions": {
     "allow": [
+      "Bash(*)",
+      "PowerShell(*)",
+      "Edit(*)",
+      "Write(*)",
+      "WebFetch(*)",
+      "WebSearch(*)",
       "Bash(node -e \"const fs=require\\('fs'\\); const d=JSON.parse\\(fs.readFileSync\\('/dev/stdin','utf8'\\)\\); console.log\\(d.version, JSON.stringify\\(d.exports?.['.']\\), d.main\\)\")",
       "Bash(node *)",
       "Bash(pnpm add *)",
@@ -30,7 +36,12 @@
       "mcp__novapost__getPage",
       "Bash(python *)",
       "Bash(python3 -c ' *)",
-      "Bash(pnpm test *)"
+      "Bash(pnpm test *)",
+      "Bash(curl -s \"https://api-stage.novapost.pl/v.1.0/clients/authorization?apiKey=80f2c257fa798f7a6e16904885b768ee08811a19\")",
+      "Bash(curl -s \"https://api-stage.novapost.pl/v.1.0/clients/authorization?apiKey=80f2c257fa798f7a6e16904885b768ee08811a19\" > C:/temp/auth_response.json 2>&1 && type C:/temp/auth_response.json)",
+      "WebFetch(domain:api-portal.novapost.com)",
+      "Bash(npx jest *)",
+      "Bash(tee /tmp/jest_output.txt)"
     ]
   }
 }

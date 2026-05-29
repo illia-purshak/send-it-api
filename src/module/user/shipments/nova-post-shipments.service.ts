@@ -115,7 +115,11 @@ export class NovaPostShipmentsService {
 
     await this.requireActiveConnection(userId, postalService.id);
 
-    const { draftId, ...shipmentPayload } = dto;
+    const { draftId, invoice, ...rest } = dto;
+    const shipmentPayload = {
+      ...rest,
+      ...(invoice != null ? { invoice } : {}),
+    };
 
     const body = await this.apiClient.request<NovaPostCreateResponse>(
       userId,

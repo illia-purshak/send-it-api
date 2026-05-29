@@ -99,7 +99,29 @@ export class NovaPostApiClient {
       });
     }
 
-    return response.json() as Promise<T>;
+    const data = (await response.json()) as Record<string, unknown>;
+
+    if (data['success'] === false) {
+      const errors = Array.isArray(data['errors']) ? (data['errors'] as string[]) : [];
+      const firstError = errors[0] ?? 'Operator returned an application-level error';
+
+      const isAuthError = /invalid|key|unauthorized|forbidden/i.test(firstError);
+
+      if (isAuthError) {
+        await this.postalConnectionsService.markAsInvalid(userId, postalServiceId);
+        throw new UnprocessableEntityException({
+          code: 'CONNECTION_INVALID',
+          message: 'Your postal connection is no longer valid. Please reconnect.',
+        });
+      }
+
+      throw new ServiceUnavailableException({
+        code: 'OPERATOR_ERROR',
+        message: firstError,
+      });
+    }
+
+    return data as T;
   }
 
   async getDivisions(

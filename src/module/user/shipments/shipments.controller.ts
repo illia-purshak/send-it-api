@@ -3,7 +3,7 @@ import {
   Controller,
   Delete,
   Get,
-  NotImplementedException,
+  NotFoundException,
   Param,
   Post,
   Query,
@@ -12,12 +12,17 @@ import {
 import {
   ApiBearerAuth,
   ApiBadRequestResponse,
+  ApiBody,
   ApiCreatedResponse,
   ApiNotFoundResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiParam,
+  ApiQuery,
+  ApiServiceUnavailableResponse,
   ApiTags,
   ApiUnauthorizedResponse,
+  ApiUnprocessableEntityResponse,
 } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard.js';
 import { CurrentUser } from '../../../common/decorators/current-user.decorator.js';
@@ -29,17 +34,12 @@ import {
   type ListShipmentsQueryDto,
 } from '../../../validation/shipments/list-shipments.schema.js';
 import {
-  CreateNovaPostShipmentSchema,
-  type CreateNovaPostShipmentDto,
-} from '../../../validation/shipments/nova-post-shipment.schema.js';
-import {
-  CreateUkrposhtaShipmentSchema,
-  type CreateUkrposhtaShipmentDto,
-} from '../../../validation/shipments/ukrposhta-shipment.schema.js';
-import {
-  CreateMeestShipmentSchema,
-  type CreateMeestShipmentDto,
-} from '../../../validation/shipments/meest-shipment.schema.js';
+  CreateShipmentSchema,
+  type CreateShipmentDto,
+} from '../../../validation/shipments/create-shipment.schema.js';
+import type { CreateNovaPostShipmentDto } from '../../../validation/shipments/nova-post-shipment.schema.js';
+import type { CreateUkrposhtaShipmentDto } from '../../../validation/shipments/ukrposhta-shipment.schema.js';
+import type { CreateMeestShipmentDto } from '../../../validation/shipments/meest-shipment.schema.js';
 import { NovaPostShipmentsService } from './nova-post-shipments.service.js';
 import { UkrposhtaShipmentsService } from './ukrposhta-shipments.service.js';
 import { MeestShipmentsService } from './meest-shipments.service.js';
@@ -58,8 +58,22 @@ export class ShipmentsController {
   ) {}
 
   @Get(SHIPMENT_ROUTES.BASE)
-  @ApiOperation({ summary: 'Fetch unified shipments list across operators and drafts' })
-  @ApiOkResponse({ description: 'Unified shipments list' })
+  @ApiOperation({
+    summary: 'Fetch unified shipments list across all connected operators and drafts',
+  })
+  @ApiQuery({ name: 'operator', required: false, type: 'string', description: 'Filter by operator slug (e.g. nova-post, ukrposhta, meest, draft)' })
+  @ApiQuery({ name: 'status', required: false, enum: ['DRAFT', 'CREATED', 'PREPARING', 'IN_TRANSIT', 'DELIVERED', 'CANCELLED', 'RETURNED', 'UNKNOWN'], description: 'Filter by normalized shipment status' })
+  @ApiQuery({ name: 'ttn', required: false, type: 'string', description: 'Filter by TTN / tracking number (partial match)' })
+  @ApiQuery({ name: 'recipient', required: false, type: 'string', description: 'Filter by recipient name (partial match)' })
+  @ApiQuery({ name: 'createdFrom', required: false, type: 'string', format: 'date', description: 'Filter by creation date (ISO 8601, inclusive)' })
+  @ApiQuery({ name: 'createdTo', required: false, type: 'string', format: 'date', description: 'Filter by creation date (ISO 8601, inclusive)' })
+  @ApiQuery({ name: 'valueFrom', required: false, type: 'number', description: 'Filter by declared value — minimum' })
+  @ApiQuery({ name: 'valueTo', required: false, type: 'number', description: 'Filter by declared value — maximum' })
+  @ApiQuery({ name: 'sortBy', required: false, enum: ['createdAt', 'declaredValue', 'recipient'], description: 'Sort field (default: createdAt)' })
+  @ApiQuery({ name: 'sortDir', required: false, enum: ['asc', 'desc'], description: 'Sort direction (default: desc)' })
+  @ApiQuery({ name: 'page', required: false, type: 'integer', description: 'Page number (default: 1)' })
+  @ApiQuery({ name: 'limit', required: false, type: 'integer', description: 'Items per page, max 100 (default: 20)' })
+  @ApiOkResponse({ description: 'Paginated unified shipments list' })
   @ApiUnauthorizedResponse()
   getUnifiedShipments(
     @CurrentUser() user: JwtUser,
@@ -67,27 +81,6 @@ export class ShipmentsController {
     query: ListShipmentsQueryDto,
   ) {
     return this.shipmentReadService.getUnifiedShipments(user.id, query);
-  }
-
-  @Get(SHIPMENT_ROUTES.NOVA_POSHTA)
-  @ApiOperation({ summary: 'Fetch Nova Poshta shipments only' })
-  @ApiOkResponse({ description: 'Nova Poshta shipments list' })
-  @ApiUnauthorizedResponse()
-  getNovaPoshtaShipments(@CurrentUser() user: JwtUser) {
-    return this.shipmentReadService.getNovaPostShipments(user.id);
-  }
-
-  @Post(SHIPMENT_ROUTES.NOVA_POSHTA)
-  @ApiOperation({ summary: 'Create a shipment via Nova Poshta API' })
-  @ApiCreatedResponse({ description: 'Shipment created - returns TTN and metadata' })
-  @ApiUnauthorizedResponse()
-  @ApiBadRequestResponse({ description: 'Validation error or CONNECTION_INVALID' })
-  createNovaPoshtaShipment(
-    @CurrentUser() user: JwtUser,
-    @Body(new ZodValidationPipe(CreateNovaPostShipmentSchema))
-    dto: CreateNovaPostShipmentDto,
-  ) {
-    return this.novaPostService.createShipment(user.id, dto);
   }
 
   @Get(SHIPMENT_ROUTES.OPERATORS)
@@ -99,10 +92,12 @@ export class ShipmentsController {
   }
 
   @Get(SHIPMENT_ROUTES.DETAIL_BY_OPERATOR_REF)
-  @ApiOperation({ summary: 'Fetch shipment detail by operator and reference' })
-  @ApiOkResponse({ description: 'Shipment detail payload' })
+  @ApiOperation({ summary: 'Fetch shipment detail by operator slug and reference (TTN)' })
+  @ApiParam({ name: 'operator', type: 'string', example: 'nova-post', description: 'Operator slug' })
+  @ApiParam({ name: 'ref', type: 'string', example: 'SHPL6145344878', description: 'Shipment TTN / reference number' })
+  @ApiOkResponse({ description: 'Full shipment detail with tracking history' })
   @ApiUnauthorizedResponse()
-  @ApiNotFoundResponse()
+  @ApiNotFoundResponse({ description: 'Shipment not found' })
   getShipmentDetail(
     @CurrentUser() user: JwtUser,
     @Param('operator') operator: string,
@@ -111,91 +106,86 @@ export class ShipmentsController {
     return this.shipmentReadService.getShipmentDetail(user.id, operator, ref);
   }
 
-  @Delete(SHIPMENT_ROUTES.NOVA_POSHTA_DETAIL)
-  @ApiOperation({ summary: 'Delete a Nova Post shipment by TTN' })
-  @ApiOkResponse({ description: 'Shipment deleted - returns deletedAt timestamp' })
-  @ApiNotFoundResponse({ description: 'Shipment not found or service unavailable' })
-  @ApiUnauthorizedResponse()
-  @ApiBadRequestResponse({ description: 'CONNECTION_INVALID' })
-  deleteNovaPoshtaShipment(
-    @CurrentUser() user: JwtUser,
-    @Param('ref') ref: string,
-  ) {
-    return this.novaPostService.deleteShipment(user.id, ref);
-  }
-
-  @Get(SHIPMENT_ROUTES.UKRPOSHTA)
-  @ApiOperation({ summary: 'Fetch Ukrposhta shipments only' })
-  @ApiOkResponse({ description: 'Ukrposhta shipments list' })
-  @ApiUnauthorizedResponse()
-  getUkrposhtaShipments(@CurrentUser() user: JwtUser) {
-    return this.shipmentReadService.getUkrposhtaShipments(user.id);
-  }
-
-  @Post(SHIPMENT_ROUTES.UKRPOSHTA)
-  @ApiOperation({ summary: 'Create a mock Ukrposhta shipment' })
+  @Post(SHIPMENT_ROUTES.BASE)
+  @ApiOperation({
+    summary: 'Create a shipment via the specified operator',
+    description:
+      'Pass `operator` in the request body to route to the correct postal provider. ' +
+      'Each operator has its own payload shape — the schema is a discriminated union on the `operator` field.',
+  })
+  @ApiBody({
+    schema: {
+      oneOf: [
+        {
+          title: 'nova-post',
+          description: 'Nova Post shipment',
+          properties: { operator: { type: 'string', enum: ['nova-post'] } },
+          required: ['operator'],
+        },
+        {
+          title: 'ukrposhta',
+          description: 'Ukrposhta shipment',
+          properties: { operator: { type: 'string', enum: ['ukrposhta'] } },
+          required: ['operator'],
+        },
+        {
+          title: 'meest',
+          description: 'Міст shipment',
+          properties: { operator: { type: 'string', enum: ['meest'] } },
+          required: ['operator'],
+        },
+      ],
+    },
+  })
   @ApiCreatedResponse({ description: 'Shipment created — returns TTN and metadata' })
+  @ApiBadRequestResponse({ description: 'Validation error or CONNECTION_INVALID' })
+  @ApiUnprocessableEntityResponse({ description: 'CONNECTION_INVALID — API key no longer valid' })
+  @ApiServiceUnavailableResponse({ description: 'OPERATOR_UNAVAILABLE or OPERATOR_ERROR' })
   @ApiUnauthorizedResponse()
-  @ApiBadRequestResponse({ description: 'Validation error' })
-  createUkrposhtaShipment(
+  createShipment(
     @CurrentUser() user: JwtUser,
-    @Body(new ZodValidationPipe(CreateUkrposhtaShipmentSchema))
-    dto: CreateUkrposhtaShipmentDto,
+    @Body(new ZodValidationPipe(CreateShipmentSchema)) dto: CreateShipmentDto,
   ) {
-    return this.ukrposhtaService.createShipment(user.id, dto);
+    if (dto.operator === 'nova-post') {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { operator, ...payload } = dto;
+      return this.novaPostService.createShipment(user.id, payload as CreateNovaPostShipmentDto);
+    }
+    if (dto.operator === 'ukrposhta') {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { operator, ...payload } = dto;
+      return this.ukrposhtaService.createShipment(user.id, payload as CreateUkrposhtaShipmentDto);
+    }
+    if (dto.operator === 'meest') {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { operator, ...payload } = dto;
+      return this.meestService.createShipment(user.id, payload as CreateMeestShipmentDto);
+    }
+    throw new NotFoundException('Operator not found');
   }
 
-  @Delete(SHIPMENT_ROUTES.UKRPOSHTA_DETAIL)
-  @ApiOperation({ summary: 'Delete a mock Ukrposhta shipment by TTN' })
+  @Delete(SHIPMENT_ROUTES.DETAIL_BY_OPERATOR_REF)
+  @ApiOperation({ summary: 'Delete / cancel a shipment by operator slug and reference (TTN)' })
+  @ApiParam({ name: 'operator', type: 'string', example: 'nova-post', description: 'Operator slug' })
+  @ApiParam({ name: 'ref', type: 'string', example: 'SHPL6145344878', description: 'Shipment TTN / reference number' })
   @ApiOkResponse({ description: 'Shipment deleted — returns deletedAt timestamp' })
-  @ApiNotFoundResponse({ description: 'Shipment not found' })
+  @ApiNotFoundResponse({ description: 'Shipment not found or operator not supported' })
+  @ApiUnprocessableEntityResponse({ description: 'CONNECTION_INVALID' })
   @ApiUnauthorizedResponse()
-  deleteUkrposhtaShipment(
+  deleteShipment(
     @CurrentUser() user: JwtUser,
+    @Param('operator') operator: string,
     @Param('ref') ref: string,
   ) {
-    return this.ukrposhtaService.deleteShipment(user.id, ref);
-  }
-
-  @Get(SHIPMENT_ROUTES.MEEST)
-  @ApiOperation({ summary: 'Fetch Meest Express shipments only' })
-  @ApiOkResponse({ description: 'Meest Express shipments list' })
-  @ApiUnauthorizedResponse()
-  getMeestShipments(@CurrentUser() user: JwtUser) {
-    return this.shipmentReadService.getMeestShipments(user.id);
-  }
-
-  @Post(SHIPMENT_ROUTES.MEEST)
-  @ApiOperation({ summary: 'Create a mock Meest Express shipment' })
-  @ApiCreatedResponse({ description: 'Shipment created — returns TTN and metadata' })
-  @ApiUnauthorizedResponse()
-  @ApiBadRequestResponse({ description: 'Validation error' })
-  createMeestShipment(
-    @CurrentUser() user: JwtUser,
-    @Body(new ZodValidationPipe(CreateMeestShipmentSchema))
-    dto: CreateMeestShipmentDto,
-  ) {
-    return this.meestService.createShipment(user.id, dto);
-  }
-
-  @Delete(SHIPMENT_ROUTES.MEEST_DETAIL)
-  @ApiOperation({ summary: 'Delete a mock Meest Express shipment by TTN' })
-  @ApiOkResponse({ description: 'Shipment deleted — returns deletedAt timestamp' })
-  @ApiNotFoundResponse({ description: 'Shipment not found' })
-  @ApiUnauthorizedResponse()
-  deleteMeestShipment(
-    @CurrentUser() user: JwtUser,
-    @Param('ref') ref: string,
-  ) {
-    return this.meestService.deleteShipment(user.id, ref);
-  }
-
-  @Post(SHIPMENT_ROUTES.MIST)
-  @ApiOperation({ summary: 'Placeholder endpoint for future Mist shipment creation' })
-  @ApiUnauthorizedResponse()
-  createMistShipment() {
-    throw new NotImplementedException(
-      'Mist shipment integration is not implemented yet.',
-    );
+    if (operator === 'nova-post') {
+      return this.novaPostService.deleteShipment(user.id, ref);
+    }
+    if (operator === 'ukrposhta') {
+      return this.ukrposhtaService.deleteShipment(user.id, ref);
+    }
+    if (operator === 'meest') {
+      return this.meestService.deleteShipment(user.id, ref);
+    }
+    throw new NotFoundException(`Operator '${operator}' is not supported for shipment deletion.`);
   }
 }

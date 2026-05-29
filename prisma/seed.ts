@@ -70,9 +70,9 @@ async function main() {
   });
 
   await db.postalService.upsert({
-    where: { slug: 'nova-poshta' },
-    create: { slug: 'nova-poshta', name: 'Nova Poshta', isActive: true },
-    update: { name: 'Nova Poshta', isActive: true },
+    where: { slug: 'nova-post' },
+    create: { slug: 'nova-post', name: 'Нова пошта', isActive: true },
+    update: { name: 'Нова пошта', isActive: true },
   });
 
   await db.postalService.upsert({
@@ -83,8 +83,8 @@ async function main() {
 
   await db.postalService.upsert({
     where: { slug: 'meest' },
-    create: { slug: 'meest', name: 'Meest Express', isActive: true },
-    update: { name: 'Meest Express', isActive: true },
+    create: { slug: 'meest', name: 'Міст', isActive: true },
+    update: { name: 'Міст', isActive: true },
   });
 
   const client = await db.user.upsert({

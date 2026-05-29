@@ -28,7 +28,7 @@ const SenderSchema = z.object({
   companyName: z.string().max(100).nullable().optional(),
   eoriCode: z.string().min(3).max(17).nullable().optional(),
   email: z.string().email().optional(),
-  ioss: z.string().max(12).optional(),
+  ioss: z.string().max(12).nullable().optional(),
   divisionNumber: z.string().nullable().optional(),
   divisionID: z.number().int().positive().nullable().optional(),
   addressParts: AddressPartsSchema.optional(),
@@ -123,7 +123,7 @@ export const CreateNovaPostShipmentSchema = z.object({
   sender: SenderSchema,
   recipient: RecipientSchema,
   parcels: z.array(ParcelSchema).min(1),
-  invoice: InvoiceSchema.optional(),
+  invoice: InvoiceSchema.nullable().optional(),
   services: z.array(ShipmentServiceSchema).optional(),
   draftId: z.number().int().positive().optional(),
 });

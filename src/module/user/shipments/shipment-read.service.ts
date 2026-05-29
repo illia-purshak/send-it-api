@@ -1,10 +1,7 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { ShipmentStatus } from '../../../../generated/prisma/enums.js';
 import { PrismaService } from '../../../prisma/prisma.service.js';
-import {
-  buildPaginatedResponse,
-  buildUnpaginatedResponse,
-} from '../../../utils/pagination.util.js';
+import { buildPaginatedResponse } from '../../../utils/pagination.util.js';
 import type { ListShipmentsQueryDto } from '../../../validation/shipments/list-shipments.schema.js';
 import { ShipmentDraftsService } from './shipment-drafts.service.js';
 import { NovaPostShipmentsService } from './nova-post-shipments.service.js';
@@ -119,27 +116,6 @@ export class ShipmentReadService {
       status: c.status,
     }));
     return { operators };
-  }
-
-  async getNovaPostShipments(userId: number) {
-    const shipments = await this.novaPostService.getShipments(userId, {
-      suppressMissingConnection: false,
-    });
-    return buildUnpaginatedResponse(shipments);
-  }
-
-  async getUkrposhtaShipments(userId: number) {
-    const shipments = await this.ukrposhtaService.getShipments(userId, {
-      suppressMissingConnection: false,
-    });
-    return buildUnpaginatedResponse(shipments);
-  }
-
-  async getMeestShipments(userId: number) {
-    const shipments = await this.meestService.getShipments(userId, {
-      suppressMissingConnection: false,
-    });
-    return buildUnpaginatedResponse(shipments);
   }
 
   async getShipmentDetail(

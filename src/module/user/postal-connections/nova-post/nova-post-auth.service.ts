@@ -36,14 +36,13 @@ export class NovaPostAuthService {
 
   private getNovaPostService(): Promise<Pick<PostalService, 'id'>> {
     return this.prisma.db.postalService.upsert({
-      where: { slug: 'nova-poshta' },
+      where: { slug: 'nova-post' },
       create: {
-        slug: 'nova-poshta',
-        name: 'Nova Poshta',
+        slug: 'nova-post',
+        name: 'Нова пошта',
         isActive: true,
       },
       update: {
-        name: 'Nova Poshta',
         isActive: true,
       },
       select: { id: true },
@@ -90,6 +89,14 @@ export class NovaPostAuthService {
     }
 
     const postalService = await this.getNovaPostService();
+
+    const existing = await this.prisma.db.userPostalConnection.findUnique({
+      where: { userId_postalServiceId: { userId, postalServiceId: postalService.id } },
+      select: { id: true },
+    });
+    if (!existing) {
+      await this.postalConnectionsService.checkOperatorLimit(userId);
+    }
 
     await this.prisma.db.userPostalConnection.upsert({
       where: {
