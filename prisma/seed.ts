@@ -5,6 +5,16 @@ import { PrismaPg } from '@prisma/adapter-pg';
 
 const PASSWORD = 'Password123!';
 
+async function upsertPlan(
+  db: PrismaClient,
+  level: number,
+  data: Parameters<PrismaClient['subscriptionPlan']['create']>[0]['data'],
+) {
+  const existing = await db.subscriptionPlan.findFirst({ where: { level } });
+  if (existing) return existing;
+  return db.subscriptionPlan.create({ data });
+}
+
 async function main() {
   const adapter = new PrismaPg(process.env['DATABASE_URL']!);
   const db = new PrismaClient({ adapter });
@@ -12,57 +22,69 @@ async function main() {
 
   const passwordHash = await bcrypt.hash(PASSWORD, 10);
 
-  await db.subscriptionPlan.upsert({
-    where: { level: 'FREE' },
-    create: { level: 'FREE', name: 'Free', price: 0, maxOperators: 1 },
-    update: {},
+  const freePlan = await upsertPlan(db, 0, {
+    level: 0,
+    name: 'Free',
+    price: 0,
+    maxOperators: 1,
+    hasAnalytics: false,
+    hasTemplates: false,
+    hasRecipients: false,
+    hasSupport: true,
+    autoRenewDefault: true,
+    isPublic: true,
+    isPersonal: false,
+    isActive: true,
   });
 
-  await db.subscriptionPlan.upsert({
-    where: { level: 'PRO' },
-    create: { level: 'PRO', name: 'Pro', price: 299, maxOperators: 5 },
-    update: {},
+  await upsertPlan(db, 1, {
+    level: 1,
+    name: 'Pro',
+    price: 299,
+    priceYearly: 2990,
+    maxOperators: 999,
+    hasAnalytics: true,
+    hasTemplates: true,
+    hasRecipients: true,
+    hasSupport: true,
+    autoRenewDefault: true,
+    isPublic: true,
+    isPersonal: false,
+    isActive: true,
   });
 
-  await db.subscriptionPlan.upsert({
-    where: { level: 'BUSINESS' },
-    create: {
-      level: 'BUSINESS',
-      name: 'Business',
-      price: 799,
-      maxOperators: 20,
-    },
-    update: {},
+  await upsertPlan(db, 2, {
+    level: 2,
+    name: 'Business',
+    price: 799,
+    priceYearly: 7990,
+    maxOperators: 999,
+    hasAnalytics: true,
+    hasTemplates: true,
+    hasRecipients: true,
+    hasSupport: true,
+    autoRenewDefault: true,
+    isPublic: true,
+    isPersonal: false,
+    isActive: true,
   });
 
   await db.postalService.upsert({
     where: { slug: 'nova-post' },
-    create: {
-      slug: 'nova-post',
-      name: 'Nova Post',
-      isActive: true,
-    },
-    update: {
-      name: 'Nova Post',
-      isActive: true,
-    },
+    create: { slug: 'nova-post', name: 'Нова пошта', isActive: true },
+    update: { name: 'Нова пошта', isActive: true },
   });
 
   await db.postalService.upsert({
-    where: { slug: 'nova-poshta' },
-    create: {
-      slug: 'nova-poshta',
-      name: 'Nova Poshta',
-      isActive: true,
-    },
-    update: {
-      name: 'Nova Poshta',
-      isActive: true,
-    },
+    where: { slug: 'ukrposhta' },
+    create: { slug: 'ukrposhta', name: 'Укрпошта', isActive: true },
+    update: { name: 'Укрпошта', isActive: true },
   });
 
-  const freePlan = await db.subscriptionPlan.findUniqueOrThrow({
-    where: { level: 'FREE' },
+  await db.postalService.upsert({
+    where: { slug: 'meest' },
+    create: { slug: 'meest', name: 'Міст', isActive: true },
+    update: { name: 'Міст', isActive: true },
   });
 
   const client = await db.user.upsert({
@@ -73,11 +95,7 @@ async function main() {
       status: 'ACTIVE',
       profileCompleted: true,
     },
-    update: {
-      role: 'CLIENT',
-      status: 'ACTIVE',
-      profileCompleted: true,
-    },
+    update: { role: 'CLIENT', status: 'ACTIVE', profileCompleted: true },
   });
 
   await db.userCredentials.upsert({
@@ -90,30 +108,33 @@ async function main() {
     where: { userId: client.id },
     create: {
       userId: client.id,
-      companyName: 'РўРћР’ В«РўРµСЃС‚РѕРІР° РљРѕРјРїР°РЅС–СЏВ»',
+      companyName: 'ТОВ «Тестова Компанія»',
       companyNameLat: 'Test Company LLC',
       edrpou: '12345678',
-      legalAddress: 'Рј. РљРёС—РІ, РІСѓР». РҐСЂРµС‰Р°С‚РёРє, 1',
-      contactPersonName: 'Р†РІР°РЅ Р†РІР°РЅРµРЅРєРѕ',
+      legalAddress: 'м. Київ, вул. Хрещатик, 1',
+      contactPersonName: 'Іван Іваненко',
     },
     update: {},
   });
 
-  const now = new Date();
-  const periodStart = new Date(now.getFullYear(), now.getMonth(), 1);
-  const periodEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-
-  await db.userSubscription.upsert({
-    where: { userId: client.id },
-    create: {
-      userId: client.id,
-      planId: freePlan.id,
-      status: 'ACTIVE',
-      currentPeriodStart: periodStart,
-      currentPeriodEnd: periodEnd,
-    },
-    update: {},
+  // Seed FREE balance for client user if none exists
+  const existingBalance = await db.userSubscriptionBalance.findFirst({
+    where: { userId: client.id, status: 'ACTIVE' },
   });
+  if (!existingBalance) {
+    await db.userSubscriptionBalance.create({
+      data: {
+        userId: client.id,
+        planId: freePlan.id,
+        periodType: 'MONTHLY',
+        daysTotal: 0,
+        periodEnd: null,
+        status: 'ACTIVE',
+        autoRenew: true,
+        position: 0,
+      },
+    });
+  }
 
   const admin = await db.admin.upsert({
     where: { email: 'admin@sendit.dev' },
@@ -121,15 +142,10 @@ async function main() {
       email: 'admin@sendit.dev',
       firstName: 'Admin',
       lastName: 'User',
-      role: 'ADMIN',
+      isSuperAdmin: false,
       status: 'ACTIVE',
     },
-    update: {
-      firstName: 'Admin',
-      lastName: 'User',
-      role: 'ADMIN',
-      status: 'ACTIVE',
-    },
+    update: { firstName: 'Admin', lastName: 'User', isSuperAdmin: false, status: 'ACTIVE' },
   });
 
   await db.adminCredentials.upsert({
@@ -144,15 +160,10 @@ async function main() {
       email: 'superadmin@sendit.dev',
       firstName: 'Super',
       lastName: 'Admin',
-      role: 'SUPER_ADMIN',
+      isSuperAdmin: true,
       status: 'ACTIVE',
     },
-    update: {
-      firstName: 'Super',
-      lastName: 'Admin',
-      role: 'SUPER_ADMIN',
-      status: 'ACTIVE',
-    },
+    update: { firstName: 'Super', lastName: 'Admin', isSuperAdmin: true, status: 'ACTIVE' },
   });
 
   await db.adminCredentials.upsert({

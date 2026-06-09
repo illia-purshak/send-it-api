@@ -1,22 +1,25 @@
 import {
-  Controller,
-  Get,
-  Post,
-  Delete,
   Body,
-  Query,
-  Param,
-  ParseIntPipe,
+  Controller,
+  Delete,
+  Get,
   HttpCode,
+  Post,
+  Put,
+  Query,
+  UseGuards,
 } from '@nestjs/common';
 import {
   ApiBearerAuth,
   ApiTags,
   ApiOkResponse,
   ApiCreatedResponse,
+  ApiNoContentResponse,
   ApiUnauthorizedResponse,
   ApiNotFoundResponse,
+  ApiConflictResponse,
 } from '@nestjs/swagger';
+import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard.js';
 import { BillingService } from './billing.service.js';
 import { CurrentUser } from '../../../common/decorators/current-user.decorator.js';
 import { ZodValidationPipe } from '../../../common/pipes/zod-validation.pipe.js';
@@ -31,11 +34,12 @@ import { BILLING_ROUTES } from '../../../constants/apiRoutes.js';
 
 @ApiTags('Billing')
 @ApiBearerAuth('bearer')
-@Controller(BILLING_ROUTES.BASE)
+@UseGuards(JwtAuthGuard)
+@Controller()
 export class BillingController {
   constructor(private readonly billingService: BillingService) {}
 
-  @Get(BILLING_ROUTES.HISTORY)
+  @Get(BILLING_ROUTES.BASE)
   @ApiOkResponse({ description: 'Paginated billing history' })
   @ApiUnauthorizedResponse()
   getHistory(
@@ -45,32 +49,55 @@ export class BillingController {
     return this.billingService.getHistory(user.id, query.page, query.limit);
   }
 
+  @Get(BILLING_ROUTES.CARD)
+  @ApiOkResponse({ description: 'Saved masked card' })
+  @ApiNotFoundResponse({ description: 'No card on file' })
+  @ApiUnauthorizedResponse()
+  getCard(@CurrentUser() user: JwtUser) {
+    return this.billingService.getCard(user.id);
+  }
+
   @Post(BILLING_ROUTES.CARD)
   @ApiCreatedResponse({ description: 'Mock card saved' })
+  @ApiConflictResponse({ description: 'Card already exists - use PUT /billing/card to update' })
   @ApiUnauthorizedResponse()
   saveCard(
     @CurrentUser() user: JwtUser,
     @Body(new ZodValidationPipe(SaveCardSchema)) dto: SaveCardDto,
   ) {
-    return this.billingService.saveCard(user.id, dto.lastFour, dto.expiryMonth, dto.expiryYear);
+    return this.billingService.saveCard(
+      user.id,
+      dto.cardNumber,
+      dto.lastFour,
+      dto.expiryMonth,
+      dto.expiryYear,
+      dto.cardholderName,
+    );
   }
 
-  @Get(BILLING_ROUTES.CARD_BY_ID)
-  @ApiOkResponse({ description: 'Card details (last 4 digits only)' })
+  @Put(BILLING_ROUTES.CARD)
+  @ApiOkResponse({ description: 'Card updated' })
+  @ApiNotFoundResponse({ description: 'No card on file - use POST /billing/card to add one' })
   @ApiUnauthorizedResponse()
-  @ApiNotFoundResponse()
-  getCard(
+  updateCard(
     @CurrentUser() user: JwtUser,
-    @Param('id', ParseIntPipe) cardId: number,
+    @Body(new ZodValidationPipe(SaveCardSchema)) dto: SaveCardDto,
   ) {
-    return this.billingService.getCard(user.id, cardId);
+    return this.billingService.updateCard(
+      user.id,
+      dto.cardNumber,
+      dto.lastFour,
+      dto.expiryMonth,
+      dto.expiryYear,
+      dto.cardholderName,
+    );
   }
 
   @Delete(BILLING_ROUTES.CARD)
-  @HttpCode(200)
-  @ApiOkResponse({ description: 'Card removed' })
-  @ApiUnauthorizedResponse()
+  @HttpCode(204)
+  @ApiNoContentResponse({ description: 'Card removed' })
   @ApiNotFoundResponse()
+  @ApiUnauthorizedResponse()
   removeCard(@CurrentUser() user: JwtUser) {
     return this.billingService.removeCard(user.id);
   }

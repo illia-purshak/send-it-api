@@ -2,7 +2,9 @@ import {
   Body,
   Controller,
   Delete,
+  Get,
   HttpCode,
+  Param,
   Post,
   UseGuards,
 } from '@nestjs/common';
@@ -13,23 +15,27 @@ import {
   ApiConflictResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiParam,
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import { AdminAuthService } from './auth.service.js';
 import { ZodValidationPipe } from '../../../common/pipes/zod-validation.pipe.js';
-import { Public } from '../../../common/decorators/public.decorator.js';
 import { CurrentAdmin } from '../../../common/decorators/current-admin.decorator.js';
 import { AdminJwtAuthGuard } from '../../../common/guards/admin-jwt-auth.guard.js';
 import { ADMIN_AUTH_ROUTES } from '../../../constants/apiRoutes.js';
 import {
-  AcceptInviteSchema,
+  SetPasswordSchema,
+  Setup2faWithTokenSchema,
+  VerifySetup2faSchema,
   AdminLoginSchema,
   AdminVerify2faSchema,
   AdminRefreshSchema,
   AdminLogoutSchema,
   Admin2faCodeSchema,
-  type AcceptInviteDto,
+  type SetPasswordDto,
+  type Setup2faWithTokenDto,
+  type VerifySetup2faDto,
   type AdminLoginDto,
   type AdminVerify2faDto,
   type AdminRefreshDto,
@@ -38,8 +44,6 @@ import {
 } from '../../../validation/auth/admin.schema.js';
 import type { AdminJwtUser } from '../../../types/admin-auth.types.js';
 import {
-  acceptInviteBodySchema,
-  acceptInviteResponseSchema,
   adminLoginResponseSchema,
   adminEnable2faResponseSchema,
   badRequestErrorSchema,
@@ -49,29 +53,63 @@ import {
   logoutBodySchema,
   logoutResponseSchema,
   refreshBodySchema,
+  setPasswordBodySchema,
+  setPasswordResponseSchema,
   setup2faResponseSchema,
+  setup2faWithTokenBodySchema,
   tokenPairResponseSchema,
   totpCodeBodySchema,
   unauthorizedErrorSchema,
   verify2faBodySchema,
+  verifySetup2faBodySchema,
+  verifySetup2faResponseSchema,
 } from '../../../common/swagger/auth.swagger.js';
 
-@Public()
 @ApiTags('Admin Auth')
-@Controller(ADMIN_AUTH_ROUTES.BASE)
+@Controller()
 export class AdminAuthController {
   constructor(private readonly adminAuthService: AdminAuthService) {}
 
-  @Post(ADMIN_AUTH_ROUTES.ACCEPT_INVITE)
-  @ApiOperation({ summary: 'Accept an admin invite and create admin credentials' })
-  @ApiBody({ schema: acceptInviteBodySchema })
-  @ApiOkResponse({ description: 'Invite accepted', schema: acceptInviteResponseSchema })
-  @ApiBadRequestResponse({ description: 'Invite token is invalid or expired', schema: badRequestErrorSchema })
-  @ApiConflictResponse({ description: 'Admin account already exists', schema: conflictErrorSchema })
-  acceptInvite(
-    @Body(new ZodValidationPipe(AcceptInviteSchema)) dto: AcceptInviteDto,
+  @Get(ADMIN_AUTH_ROUTES.VALIDATE_INVITE)
+  @ApiOperation({ summary: 'Validate an admin invite token before showing the registration form' })
+  @ApiParam({ name: 'token', description: 'Invite token from the email link' })
+  @ApiOkResponse({ description: 'Token is valid — returns the invited email' })
+  @ApiBadRequestResponse({ description: 'Token is invalid, expired, or already used', schema: badRequestErrorSchema })
+  validateInvite(@Param('token') token: string) {
+    return this.adminAuthService.validateInvite(token);
+  }
+
+  @Post(ADMIN_AUTH_ROUTES.SET_PASSWORD)
+  @ApiOperation({ summary: 'Step 1 of onboarding: set password using a valid invite token' })
+  @ApiBody({ schema: setPasswordBodySchema })
+  @ApiOkResponse({ description: 'Password set — proceed to 2FA setup', schema: setPasswordResponseSchema })
+  @ApiBadRequestResponse({ description: 'Invite token is invalid, expired, or admin not in PENDING state', schema: badRequestErrorSchema })
+  setPassword(
+    @Body(new ZodValidationPipe(SetPasswordSchema)) dto: SetPasswordDto,
   ) {
-    return this.adminAuthService.acceptInvite(dto);
+    return this.adminAuthService.setPassword(dto);
+  }
+
+  @Post(ADMIN_AUTH_ROUTES.TWO_FA_SETUP)
+  @ApiOperation({ summary: 'Step 2 of onboarding: generate TOTP secret and QR code using invite token' })
+  @ApiBody({ schema: setup2faWithTokenBodySchema })
+  @ApiOkResponse({ description: 'TOTP setup payload', schema: setup2faResponseSchema })
+  @ApiBadRequestResponse({ description: 'Invite token is invalid or expired', schema: badRequestErrorSchema })
+  setup2faWithToken(
+    @Body(new ZodValidationPipe(Setup2faWithTokenSchema)) dto: Setup2faWithTokenDto,
+  ) {
+    return this.adminAuthService.setup2faWithToken(dto);
+  }
+
+  @Post(ADMIN_AUTH_ROUTES.TWO_FA_VERIFY_SETUP)
+  @ApiOperation({ summary: 'Step 3 of onboarding: verify TOTP, activate admin, and receive token pair' })
+  @ApiBody({ schema: verifySetup2faBodySchema })
+  @ApiOkResponse({ description: 'Admin activated and token pair issued', schema: verifySetup2faResponseSchema })
+  @ApiBadRequestResponse({ description: 'Invalid invite token or TOTP code', schema: badRequestErrorSchema })
+  verifySetupWithToken(
+    @Body(new ZodValidationPipe(VerifySetup2faSchema)) dto: VerifySetup2faDto,
+  ) {
+    return this.adminAuthService.verifySetupWithToken(dto);
   }
 
   @Post(ADMIN_AUTH_ROUTES.LOGIN)
@@ -138,20 +176,9 @@ export class AdminAuthController {
   }
 
   @UseGuards(AdminJwtAuthGuard)
-  @Post(ADMIN_AUTH_ROUTES.TWO_FA_SETUP)
-  @ApiOperation({ summary: 'Generate a TOTP secret and QR code for the current admin' })
-  @ApiBearerAuth('bearer')
-  @ApiOkResponse({ description: 'TOTP setup payload', schema: setup2faResponseSchema })
-  @ApiUnauthorizedResponse({ description: 'Missing or invalid access token', schema: unauthorizedErrorSchema })
-  @ApiConflictResponse({ description: '2FA is already enabled', schema: conflictErrorSchema })
-  setup2fa(@CurrentAdmin() admin: AdminJwtUser) {
-    return this.adminAuthService.setup2fa(admin);
-  }
-
-  @UseGuards(AdminJwtAuthGuard)
   @Post(ADMIN_AUTH_ROUTES.TWO_FA_ENABLE)
   @HttpCode(200)
-  @ApiOperation({ summary: 'Enable admin 2FA and activate the account' })
+  @ApiOperation({ summary: 'Enable admin 2FA (for already-authenticated admins reconfiguring 2FA)' })
   @ApiBearerAuth('bearer')
   @ApiBody({ schema: totpCodeBodySchema })
   @ApiOkResponse({

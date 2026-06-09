@@ -95,19 +95,61 @@ export class AuthService {
     id: number;
     email: string | null;
     role: string;
-  }): Promise<{ accessToken: string; refreshToken: string }> {
-    const accessToken = this.issueAccessToken(user);
-    const refreshToken = await this.issueRefreshToken(user.id);
-    return { accessToken, refreshToken };
+  }): Promise<{
+    accessToken: string;
+    refreshToken: string;
+    currentPlan: object | null;
+    scheduledPlan: object | null;
+  }> {
+    const [accessToken, refreshToken, planInfo] = await Promise.all([
+      Promise.resolve(this.issueAccessToken(user)),
+      this.issueRefreshToken(user.id),
+      this.getCurrentPlanInfo(user.id),
+    ]);
+    return { accessToken, refreshToken, ...planInfo };
+  }
+
+  private async getCurrentPlanInfo(userId: number) {
+    const active = await this.prisma.db.userSubscriptionBalance.findFirst({
+      where: { userId, status: 'ACTIVE' },
+      include: { plan: true },
+    });
+
+    const planSource = active?.plan
+      ?? await this.prisma.db.subscriptionPlan.findFirst({ where: { level: 0, isActive: true } });
+
+    const currentPlan = planSource
+      ? {
+          name: planSource.name,
+          level: planSource.level,
+          hasAnalytics: planSource.hasAnalytics,
+          hasTemplates: planSource.hasTemplates,
+          hasRecipients: planSource.hasRecipients,
+          maxOperators: planSource.maxOperators,
+        }
+      : null;
+
+    let scheduledPlan: { name: string; activatesAt: Date } | null = null;
+    if (active?.scheduledSwitchTo && active.scheduledSwitchAt) {
+      const switchTarget = await this.prisma.db.userSubscriptionBalance.findUnique({
+        where: { id: active.scheduledSwitchTo },
+        include: { plan: true },
+      });
+      if (switchTarget) {
+        scheduledPlan = { name: switchTarget.plan.name, activatesAt: active.scheduledSwitchAt };
+      }
+    }
+
+    return { currentPlan, scheduledPlan };
   }
 
   async getMe(user: JwtUser) {
     const record = await this.prisma.db.user.findUniqueOrThrow({
       where: { id: user.id },
-      include: { profile: true },
+      include: { profile: true, twoFactorAuth: { select: { isEnabled: true } } },
     });
-    const { profile, ...rest } = record;
-    return { ...rest, profile: profile ?? null };
+    const { profile, twoFactorAuth, ...rest } = record;
+    return { ...rest, profile: profile ?? null, twoFactorEnabled: twoFactorAuth?.isEnabled ?? false };
   }
 
   async register(dto: RegisterDto): Promise<{

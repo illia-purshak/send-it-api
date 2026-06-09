@@ -1,12 +1,22 @@
 import { z } from 'zod';
 
-export const AcceptInviteSchema = z.object({
+export const SetPasswordSchema = z.object({
   token: z.string().min(1),
   password: z.string().min(8).max(128),
-  firstName: z.string().min(1),
-  lastName: z.string().min(1),
 });
-export type AcceptInviteDto = z.infer<typeof AcceptInviteSchema>;
+export type SetPasswordDto = z.infer<typeof SetPasswordSchema>;
+
+export const Setup2faWithTokenSchema = z.object({
+  token: z.string().min(1),
+});
+export type Setup2faWithTokenDto = z.infer<typeof Setup2faWithTokenSchema>;
+
+export const VerifySetup2faSchema = z.object({
+  token: z.string().min(1),
+  secret: z.string().min(1),
+  totpCode: z.string().length(6),
+});
+export type VerifySetup2faDto = z.infer<typeof VerifySetup2faSchema>;
 
 export const AdminLoginSchema = z.object({
   email: z.email(),

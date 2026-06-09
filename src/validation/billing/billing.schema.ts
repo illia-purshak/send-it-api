@@ -2,19 +2,17 @@ import { z } from 'zod';
 
 export const SaveCardSchema = z
   .object({
-    cardNumber: z.string().regex(/^\d{13,19}$/).optional(),
-    lastFour: z.string().regex(/^\d{4}$/).optional(),
+    cardNumber: z.string().regex(/^\d{13,19}$/),
     expiryMonth: z.number().int().min(1).max(12),
     expiryYear: z.number().int().min(new Date().getFullYear()),
+    cardholderName: z.string().trim().min(1).max(100),
   })
-  .refine(
-    (d) => d.cardNumber !== undefined || d.lastFour !== undefined,
-    { message: 'Either cardNumber or lastFour must be provided' },
-  )
   .transform((d) => ({
-    lastFour: d.cardNumber ? d.cardNumber.slice(-4) : d.lastFour!,
+    cardNumber: d.cardNumber,
+    lastFour: d.cardNumber.slice(-4),
     expiryMonth: d.expiryMonth,
     expiryYear: d.expiryYear,
+    cardholderName: d.cardholderName,
   }));
 export type SaveCardDto = z.infer<typeof SaveCardSchema>;
 

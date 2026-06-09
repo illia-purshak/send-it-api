@@ -19,28 +19,22 @@ enum UserStatus {
   DELETED
 }
 
-enum AdminRole {
-  ADMIN
-  SUPER_ADMIN
-}
-
 enum AdminStatus {
+  PENDING
   ACTIVE
   INACTIVE
   DELETED
 }
 
-enum SubscriptionLevel {
-  FREE
-  PRO
-  BUSINESS
+enum SubscriptionPeriodType {
+  MONTHLY
+  YEARLY
 }
 
-enum SubscriptionStatus {
+enum SubscriptionBalanceStatus {
   ACTIVE
-  CANCELLED
-  PENDING_UPGRADE
-  PENDING_DOWNGRADE
+  PAUSED
+  QUEUED
   EXPIRED
 }
 
@@ -53,7 +47,14 @@ enum BillingStatus {
 enum NotificationType {
   SHIPMENT_STATUS
   SUBSCRIPTION
+  POSTAL_CONNECTION
+  ACCOUNT
   SYSTEM
+}
+
+enum RecipientType {
+  INDIVIDUAL
+  ORGANIZATION
 }
 
 enum ShipmentStatus {
@@ -67,9 +68,27 @@ enum ShipmentStatus {
   UNKNOWN
 }
 
-enum SupportTicketStatus {
-  OPEN
+enum ShipmentType {
+  DOCUMENT
+  PACKAGE
+  BOX
+  CARGO
+  PALLET
+  UNKNOWN
+}
+
+enum TicketStatus {
+  WAITING
+  IN_PROGRESS
   CLOSED
+}
+
+enum TicketCategory {
+  QUESTION
+  TECHNICAL
+  BILLING
+  SUGGESTION
+  OTHER
 }
 
 enum DiscountType {
@@ -84,6 +103,16 @@ model User {
   role             UserRole    @default(CLIENT)
   status           UserStatus  @default(INACTIVE)
   profileCompleted Boolean     @default(false)
+  avatarUrl        String?
+  language         String      @default("uk")
+  timezone         String      @default("Europe/Kyiv")
+  dateFormat       String      @default("DD.MM.YYYY")
+  notifSubscription     Boolean @default(true)
+  notifPostalConnection Boolean @default(true)
+  notifAccount          Boolean @default(true)
+  notifSystem           Boolean @default(true)
+  notifEmail            Boolean @default(false)
+  scheduledDeletionAt  DateTime?
   createdAt        DateTime    @default(now())
   updatedAt        DateTime    @updatedAt
   credentials         UserCredentials?
@@ -91,12 +120,14 @@ model User {
   resetPasswordTokens ResetPasswordToken[]
   profile             UserProfile?
   twoFactorAuth       TwoFactorAuth?
-  postalConnections   UserPostalConnection[]
-  subscription        UserSubscription?
-  billingHistory      BillingHistory[]
+  postalConnections    UserPostalConnection[]
+  subscriptionBalances UserSubscriptionBalance[]
+  personalPlans        SubscriptionPlan[]         @relation("PersonalPlan")
+  billingHistory       BillingHistory[]
   shipmentTemplates   ShipmentTemplate[]
   shipmentDrafts      ShipmentDraft[]
-  shipments           Shipment[]
+  ukrposhtaShipments  UkrposhtaShipment[]
+  meestShipments      MeestShipment[]
   paymentCard         MockPaymentCard?
   recipients          Recipient[]
   notifications       Notification[]
@@ -108,6 +139,7 @@ model UserProfile {
   userId            Int     @id
   companyName       String
   companyNameLat    String?
+  ownershipForm     String?
   edrpou            String  @unique
   taxNumber         String?
   legalAddress      String
@@ -161,22 +193,29 @@ model TwoFactorAuth {
 }
 
 model Admin {
-  id          Int         @id @default(autoincrement())
-  email       String      @unique
-  firstName   String
-  lastName    String
-  role        AdminRole   @default(ADMIN)
-  status      AdminStatus @default(INACTIVE)
-  invitedById Int?
-  createdAt   DateTime    @default(now())
-  updatedAt   DateTime    @updatedAt
-  invitedBy       Admin?          @relation("AdminInvitedBy", fields: [invitedById], references: [id])
-  invitedAdmins   Admin[]         @relation("AdminInvitedBy")
+  id           Int         @id @default(autoincrement())
+  email        String      @unique
+  firstName    String?
+  lastName     String?
+  isSuperAdmin Boolean     @default(false)
+  status       AdminStatus @default(PENDING)
+  invitedById  Int?
+  avatarUrl    String?
+  language     String      @default("uk")
+  timezone     String      @default("Europe/Kyiv")
+  dateFormat   String      @default("DD.MM.YYYY")
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  invitedBy       Admin?              @relation("AdminInvitedBy", fields: [invitedById], references: [id])
+  invitedAdmins   Admin[]             @relation("AdminInvitedBy")
   credentials     AdminCredentials?
   refreshTokens   AdminRefreshToken[]
-  adminInvites    AdminInvite[]   @relation("InvitedBy")
   twoFactorAuth   AdminTwoFactorAuth?
+  adminInvites    AdminInvite[]       @relation("InvitedBy")
+  receivedInvites AdminInvite[]       @relation("AdminInvitee")
   supportMessages SupportMessage[]
+  assignedTickets SupportTicket[]  @relation("AssignedTickets")
 
   @@index([email])
 }
@@ -213,16 +252,17 @@ model AdminTwoFactorAuth {
 }
 model AdminInvite {
   id          Int       @id @default(autoincrement())
-  email       String
+  adminId     Int
   token       String    @unique
   invitedById Int
   usedAt      DateTime?
   expiresAt   DateTime
   createdAt   DateTime  @default(now())
 
+  admin     Admin @relation("AdminInvitee", fields: [adminId], references: [id], onDelete: Cascade)
   invitedBy Admin @relation("InvitedBy", fields: [invitedById], references: [id])
 
-  @@index([email])
+  @@index([token])
 }
 enum PostalConnectionStatus {
   ACTIVE
@@ -241,7 +281,6 @@ model PostalService {
   userConnections   UserPostalConnection[]
   shipmentTemplates ShipmentTemplate[]
   shipmentDrafts    ShipmentDraft[]
-  shipments         Shipment[]
 }
 model UserPostalConnection {
   id              Int      @id @default(autoincrement())
@@ -259,66 +298,85 @@ model UserPostalConnection {
   @@index([userId])
 }
 model SubscriptionPlan {
-  id               Int               @id @default(autoincrement())
-  level            SubscriptionLevel @unique
+  id               Int      @id @default(autoincrement())
   name             String
-  price            Decimal           @db.Decimal(10, 2)
+  level            Int      // 0=FREE, 1=PRO, 2=BUSINESS, 3+=custom
+  price            Decimal  @db.Decimal(10, 2)
+  priceYearly      Decimal? @db.Decimal(10, 2)
   maxOperators     Int
-  description      String?
-  isActive         Boolean           @default(true)
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
+  hasAnalytics     Boolean  @default(false)
+  hasTemplates     Boolean  @default(false)
+  hasRecipients    Boolean  @default(false)
+  hasSupport       Boolean  @default(true)
+  autoRenewDefault Boolean  @default(true)
+  isPublic         Boolean  @default(true)
+  isPersonal       Boolean  @default(false)
+  targetUserId     Int?
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
-  subscriptions        UserSubscription[] @relation("CurrentPlan")
-  pendingSubscriptions UserSubscription[] @relation("NextPlan")
-  billingHistory       BillingHistory[]
+  balances   UserSubscriptionBalance[]
+  billing    BillingHistory[]
+  targetUser User?                     @relation("PersonalPlan", fields: [targetUserId], references: [id])
 }
 
-model UserSubscription {
-  id                 Int                @id @default(autoincrement())
-  userId             Int                @unique
-  planId             Int
-  status             SubscriptionStatus @default(ACTIVE)
-  currentPeriodStart DateTime
-  currentPeriodEnd   DateTime
-  nextPlanId         Int?
-  cancelledAt        DateTime?
-  customAmount       Decimal?           @db.Decimal(10, 2)
-  discountType       DiscountType?
-  createdAt          DateTime           @default(now())
-  updatedAt          DateTime           @updatedAt
+model UserSubscriptionBalance {
+  id                Int                       @id @default(autoincrement())
+  userId            Int
+  planId            Int
+  periodType        SubscriptionPeriodType    @default(MONTHLY)
+  daysTotal         Int
+  periodEnd         DateTime?
+  pausedAt          DateTime?
+  status            SubscriptionBalanceStatus @default(ACTIVE)
+  autoRenew         Boolean                   @default(true)
+  position          Int                       @default(0)
+  scheduledSwitchTo Int?
+  scheduledSwitchAt DateTime?
+  customAmount      Decimal?                  @db.Decimal(10, 2)
+  discountType      DiscountType?
+  createdAt         DateTime                  @default(now())
+  updatedAt         DateTime                  @updatedAt
 
-  user     User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  plan     SubscriptionPlan @relation("CurrentPlan", fields: [planId], references: [id])
-  nextPlan SubscriptionPlan? @relation("NextPlan", fields: [nextPlanId], references: [id])
+  user    User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan    SubscriptionPlan @relation(fields: [planId], references: [id])
+  billing BillingHistory[]
 
-  @@index([userId])
+  @@index([userId, status])
 }
+
 model BillingHistory {
-  id        Int           @id @default(autoincrement())
-  userId    Int
-  planId    Int
-  amount    Decimal       @db.Decimal(10, 2)
-  status    BillingStatus @default(PAID)
+  id          Int                    @id @default(autoincrement())
+  userId      Int
+  planId      Int
+  balanceId   Int
+  periodType  SubscriptionPeriodType @default(MONTHLY)
+  amount      Decimal                @db.Decimal(10, 2)
+  status      BillingStatus          @default(PAID)
   periodStart DateTime
   periodEnd   DateTime
-  paidAt    DateTime?
-  createdAt DateTime      @default(now())
+  paidAt      DateTime?
+  createdAt   DateTime               @default(now())
 
-  user User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  plan SubscriptionPlan @relation(fields: [planId], references: [id])
+  user    User                    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan    SubscriptionPlan        @relation(fields: [planId], references: [id])
+  balance UserSubscriptionBalance @relation(fields: [balanceId], references: [id])
 
   @@index([userId])
 }
 
 model ShipmentTemplate {
-  id              Int      @id @default(autoincrement())
+  id              Int          @id @default(autoincrement())
   userId          Int
   postalServiceId Int?
   name            String
+  description     String?
+  shipmentType    ShipmentType @default(UNKNOWN)
+  usageCount      Int          @default(0)
   templateData    Json
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
 
   user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
   postalService PostalService? @relation(fields: [postalServiceId], references: [id])
@@ -327,16 +385,21 @@ model ShipmentTemplate {
 }
 
 model Recipient {
-  id          Int      @id @default(autoincrement())
-  userId      Int
-  firstName   String
-  lastName    String
-  phone       String
-  email       String?
-  address     String?
-  note        String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id            Int           @id @default(autoincrement())
+  userId        Int
+  type          RecipientType @default(INDIVIDUAL)
+  companyName   String?
+  ownershipForm String?
+  edrpou        String?
+  firstName     String
+  lastName      String
+  patronymic    String?
+  phone         String
+  email         String?
+  address       Json?
+  note          String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -351,6 +414,7 @@ model Notification {
   body      String
   isRead    Boolean          @default(false)
   createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -358,18 +422,24 @@ model Notification {
 }
 
 model SupportTicket {
-  id        Int                 @id @default(autoincrement())
-  userId    Int
-  subject   String
-  status    SupportTicketStatus @default(OPEN)
-  closedAt  DateTime?
-  createdAt DateTime            @default(now())
-  updatedAt DateTime            @updatedAt
+  id           Int            @id @default(autoincrement())
+  userId       Int
+  assignedToId Int?
+  subject      String
+  category     TicketCategory
+  status       TicketStatus   @default(WAITING)
+  closedAt     DateTime?
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
 
-  user     User             @relation(fields: [userId], references: [id], onDelete: Cascade)
-  messages SupportMessage[]
+  user       User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  assignedTo Admin?             @relation("AssignedTickets", fields: [assignedToId], references: [id])
+  messages   SupportMessage[]
+  readStatus TicketReadStatus[]
 
   @@index([userId, status])
+  @@index([assignedToId, status])
+  @@index([status, createdAt])
 }
 
 model SupportMessage {
@@ -378,12 +448,27 @@ model SupportMessage {
   userId    Int?
   adminId   Int?
   body      String
+  isSystem  Boolean  @default(false)
   createdAt DateTime @default(now())
 
   ticket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   user   User?         @relation(fields: [userId], references: [id])
   admin  Admin?        @relation(fields: [adminId], references: [id])
 
+  @@index([ticketId, createdAt])
+}
+
+model TicketReadStatus {
+  id         Int      @id @default(autoincrement())
+  ticketId   Int
+  userId     Int?
+  adminId    Int?
+  lastReadAt DateTime @default(now())
+
+  ticket SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+
+  @@unique([ticketId, userId])
+  @@unique([ticketId, adminId])
   @@index([ticketId])
 }
 
@@ -401,37 +486,62 @@ model ShipmentDraft {
   @@index([userId])
 }
 
-model Shipment {
-  id                Int            @id @default(autoincrement())
-  userId            Int
-  postalServiceId   Int
-  operatorRef       String
-  rawStatus         String?
-  normalizedStatus  ShipmentStatus @default(UNKNOWN)
-  recipientName     String?
-  declaredValue     Decimal?       @db.Decimal(10, 2)
-  operatorCreatedAt DateTime?
-  lastSyncedAt      DateTime       @default(now())
-  metadata          Json?
-  createdAt         DateTime       @default(now())
-  updatedAt         DateTime       @updatedAt
+model UkrposhtaShipment {
+  id               Int            @id @default(autoincrement())
+  userId           Int
+  ttn              String         @unique
+  senderName       String
+  senderPhone      String
+  recipientName    String
+  recipientPhone   String
+  recipientAddress String
+  recipientCity    String
+  weight           Float
+  declaredValue    Decimal        @db.Decimal(10, 2)
+  description      String?
+  rawStatus        String
+  normalizedStatus ShipmentStatus @default(CREATED)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
 
-  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  postalService PostalService @relation(fields: [postalServiceId], references: [id])
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  @@unique([userId, postalServiceId, operatorRef])
-  @@index([userId, normalizedStatus])
-  @@index([userId, operatorCreatedAt])
+  @@index([userId])
+}
+
+model MeestShipment {
+  id               Int            @id @default(autoincrement())
+  userId           Int
+  ttn              String         @unique
+  senderName       String
+  senderPhone      String
+  recipientName    String
+  recipientPhone   String
+  recipientAddress String
+  recipientCity    String
+  weight           Float
+  declaredValue    Decimal        @db.Decimal(10, 2)
+  description      String?
+  rawStatus        String
+  normalizedStatus ShipmentStatus @default(CREATED)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 model MockPaymentCard {
-  id          Int      @id @default(autoincrement())
-  userId      Int      @unique
-  lastFour    String
-  expiryMonth Int
-  expiryYear  Int
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id                      Int      @id @default(autoincrement())
+  userId                  Int      @unique
+  lastFour                String
+  encryptedCardNumber     String
+  encryptedCardholderName String
+  expiryMonth             Int
+  expiryYear              Int
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }

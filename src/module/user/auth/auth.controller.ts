@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, Post } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Post, UseGuards } from '@nestjs/common';
 import {
   ApiBadRequestResponse,
   ApiBearerAuth,
@@ -11,6 +11,7 @@ import {
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
+import { JwtAuthGuard } from '../../../common/guards/jwt-auth.guard.js';
 import { AuthService } from './auth.service.js';
 import { ZodValidationPipe } from '../../../common/pipes/zod-validation.pipe.js';
 import { Public } from '../../../common/decorators/public.decorator.js';
@@ -64,7 +65,8 @@ import {
 } from '../../../common/swagger/auth.swagger.js';
 
 @ApiTags('User Auth')
-@Controller(AUTH_ROUTES.BASE)
+@UseGuards(JwtAuthGuard)
+@Controller()
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 

@@ -1,5 +1,4 @@
 import { Module } from '@nestjs/common';
-import { APP_GUARD } from '@nestjs/core';
 import { ConfigModule } from '@nestjs/config';
 import { ScheduleModule } from '@nestjs/schedule';
 import { AppController } from './app.controller.js';
@@ -14,7 +13,20 @@ import { PostalConnectionsModule } from './module/user/postal-connections/postal
 import { OnboardingModule } from './module/user/onboarding/onboarding.module.js';
 import { SchedulerModule } from './module/scheduler/scheduler.module.js';
 import { ShipmentsModule } from './module/user/shipments/shipments.module.js';
-import { JwtAuthGuard } from './common/guards/jwt-auth.guard.js';
+import { DraftsModule } from './module/user/drafts/drafts.module.js';
+import { TemplatesModule } from './module/user/templates/templates.module.js';
+import { ProfileModule } from './module/user/profile/profile.module.js';
+import { RecipientsModule } from './module/user/recipients/recipients.module.js';
+import { NotificationsModule } from './module/user/notifications/notifications.module.js';
+import { AdminProfileModule } from './module/admin/profile/profile.module.js';
+import { AdminUsersModule } from './module/admin/users/admin-users.module.js';
+import { AdminServicesModule } from './module/admin/services/admin-services.module.js';
+import { AdminSupportModule } from './module/admin/support/admin-support.module.js';
+import { SupportModule } from './module/user/support/support.module.js';
+import { AdminAdminsModule } from './module/admin/admins/admin-admins.module.js';
+import { AdminPlansModule } from './module/admin/plans/admin-plans.module.js';
+import { AdminStatisticsModule } from './module/admin/statistics/admin-statistics.module.js';
+import { AnalyticsModule } from './module/user/analytics/analytics.module.js';
 
 @Module({
   imports: [
@@ -30,8 +42,22 @@ import { JwtAuthGuard } from './common/guards/jwt-auth.guard.js';
     OnboardingModule,
     SchedulerModule,
     ShipmentsModule,
+    DraftsModule,
+    TemplatesModule,
+    ProfileModule,
+    RecipientsModule,
+    NotificationsModule,
+    SupportModule,
+    AdminProfileModule,
+    AdminUsersModule,
+    AdminServicesModule,
+    AdminSupportModule,
+    AdminAdminsModule,
+    AdminPlansModule,
+    AdminStatisticsModule,
+    AnalyticsModule,
   ],
   controllers: [AppController],
-  providers: [AppService, { provide: APP_GUARD, useClass: JwtAuthGuard }],
+  providers: [AppService],
 })
 export class AppModule {}

@@ -1,74 +1,156 @@
-export const AUTH_ROUTES = {
-  BASE: 'auth',
-  ME: 'me',
-  REGISTER: 'register',
-  LOGIN: 'login',
-  REFRESH: 'refresh',
-  FORGOT_PASSWORD: 'forgot-password',
-  RESET_PASSWORD: 'reset-password',
-  LOGOUT: 'logout',
-  TWO_FA_SETUP: '2fa/setup',
-  TWO_FA_ENABLE: '2fa/enable',
-  TWO_FA_DISABLE: '2fa/disable',
-  TWO_FA_VERIFY: '2fa/verify',
-  COMPLETE_PROFILE: 'complete-profile',
+const BASE_URL = 'api/v1';
+
+const API_ROUTES = {
+  AUTH_ROUTES: {
+    BASE: `${BASE_URL}/auth`,
+    ME: `${BASE_URL}/auth/me`,
+    REGISTER: `${BASE_URL}/auth/register`,
+    LOGIN: `${BASE_URL}/auth/login`,
+    REFRESH: `${BASE_URL}/auth/refresh`,
+    FORGOT_PASSWORD: `${BASE_URL}/auth/forgot-password`,
+    RESET_PASSWORD: `${BASE_URL}/auth/reset-password`,
+    LOGOUT: `${BASE_URL}/auth/logout`,
+    TWO_FA_SETUP: `${BASE_URL}/auth/2fa/setup`,
+    TWO_FA_ENABLE: `${BASE_URL}/auth/2fa/enable`,
+    TWO_FA_DISABLE: `${BASE_URL}/auth/2fa/disable`,
+    TWO_FA_VERIFY: `${BASE_URL}/auth/2fa/verify`,
+    COMPLETE_PROFILE: `${BASE_URL}/auth/complete-profile`,
+  },
+  ADMIN_AUTH_ROUTES: {
+    BASE: `${BASE_URL}/admin/auth`,
+    VALIDATE_INVITE: `${BASE_URL}/admin/auth/invite/:token`,
+    SET_PASSWORD: `${BASE_URL}/admin/auth/set-password`,
+    LOGIN: `${BASE_URL}/admin/auth/login`,
+    VERIFY_2FA: `${BASE_URL}/admin/auth/verify-2fa`,
+    REFRESH: `${BASE_URL}/admin/auth/refresh`,
+    LOGOUT: `${BASE_URL}/admin/auth/logout`,
+    TWO_FA_SETUP: `${BASE_URL}/admin/auth/2fa/setup`,
+    TWO_FA_VERIFY_SETUP: `${BASE_URL}/admin/auth/2fa/verify-setup`,
+    TWO_FA_ENABLE: `${BASE_URL}/admin/auth/2fa/enable`,
+    TWO_FA_DISABLE: `${BASE_URL}/admin/auth/2fa/disable`,
+  },
+  SUBSCRIPTION_ROUTES: {
+    BASE: `${BASE_URL}/subscriptions`,
+    PLANS: `${BASE_URL}/subscriptions/plans`,
+    ME: `${BASE_URL}/subscriptions/me`,
+    BY_ID: `${BASE_URL}/subscriptions/:id`,
+  },
+  ADMIN_SUBSCRIPTION_ROUTES: {
+    BASE: `${BASE_URL}/admin/subscriptions`,
+    BY_ID: `${BASE_URL}/admin/subscriptions/:id`,
+  },
+  ADMIN_PLAN_ROUTES: {
+    BASE: `${BASE_URL}/admin/plans`,
+    BY_ID: `${BASE_URL}/admin/plans/:id`,
+  },
+  BILLING_ROUTES: {
+    BASE: `${BASE_URL}/billing`,
+    CARD: `${BASE_URL}/billing/card`,
+  },
+  POSTAL_ROUTES: {
+    BASE: `${BASE_URL}/postal-connections`,
+    BY_ID: `${BASE_URL}/postal-connections/:id`,
+    NOVA_POST_REQUEST_KEY: `${BASE_URL}/postal-connections/nova-post/request-key`,
+    NOVA_POST_DIVISIONS: `${BASE_URL}/postal-connections/nova-post/divisions`,
+  },
+  ONBOARDING_ROUTES: {
+    BASE: `${BASE_URL}/onboarding`,
+    CHECKLIST: `${BASE_URL}/onboarding/checklist`,
+  },
+  DRAFT_ROUTES: {
+    BASE: `${BASE_URL}/drafts`,
+    BY_ID: `${BASE_URL}/drafts/:id`,
+  },
+  SHIPMENT_ROUTES: {
+    BASE: `${BASE_URL}/shipments`,
+    OPERATORS: `${BASE_URL}/shipments/operators`,
+    DETAIL_BY_OPERATOR_REF: `${BASE_URL}/shipments/:operator/:ref`,
+  },
+  TEMPLATE_ROUTES: {
+    BASE: `${BASE_URL}/templates`,
+    BY_ID: `${BASE_URL}/templates/:id`,
+    INCREMENT_USAGE: `${BASE_URL}/templates/:id/increment-usage`,
+  },
+  PROFILE_ROUTES: {
+    BASE: `${BASE_URL}/profile`,
+    SETTINGS: `${BASE_URL}/profile/settings`,
+  },
+  USERS_ROUTES: {
+    BASE: `${BASE_URL}/users`,
+    ME: `${BASE_URL}/users/me`,
+    ME_RESTORE: `${BASE_URL}/users/me/restore`,
+  },
+  ADMIN_PROFILE_ROUTES: {
+    BASE: `${BASE_URL}/admin/profile`,
+    SETTINGS: `${BASE_URL}/admin/profile/settings`,
+  },
+  RECIPIENT_ROUTES: {
+    BASE: `${BASE_URL}/recipients`,
+    BY_ID: `${BASE_URL}/recipients/:id`,
+  },
+  NOTIFICATION_ROUTES: {
+    BASE: `${BASE_URL}/notifications`,
+    BY_ID: `${BASE_URL}/notifications/:id`,
+    UNREAD_COUNT: `${BASE_URL}/notifications/unread-count`,
+  },
+  ADMIN_USERS_ROUTES: {
+    BASE: `${BASE_URL}/admin/users`,
+    BY_ID: `${BASE_URL}/admin/users/:id`,
+  },
+  ADMIN_SERVICES_ROUTES: {
+    BASE: `${BASE_URL}/admin/services`,
+    BY_ID: `${BASE_URL}/admin/services/:id`,
+  },
+  ADMIN_STATISTICS_ROUTES: {
+    BASE: `${BASE_URL}/admin/statistics`,
+  },
+  SUPPORT_ROUTES: {
+    BASE: `${BASE_URL}/support`,
+    TICKETS: `${BASE_URL}/support/tickets`,
+    TICKET_BY_ID: `${BASE_URL}/support/tickets/:id`,
+    TICKET_MESSAGE: `${BASE_URL}/support/tickets/:id/message`,
+    TICKET_READ: `${BASE_URL}/support/tickets/:id/read`,
+  },
+  ADMIN_SUPPORT_ROUTES: {
+    BASE: `${BASE_URL}/admin/support`,
+    TICKETS: `${BASE_URL}/admin/support/tickets`,
+    TICKETS_MY: `${BASE_URL}/admin/support/tickets/my`,
+    TICKET_BY_ID: `${BASE_URL}/admin/support/tickets/:id`,
+    TICKET_MESSAGE: `${BASE_URL}/admin/support/tickets/:id/message`,
+    TICKET_READ: `${BASE_URL}/admin/support/tickets/:id/read`,
+  },
+  ADMIN_ADMINS_ROUTES: {
+    BASE: `${BASE_URL}/admin/admins`,
+    BY_ID: `${BASE_URL}/admin/admins/:id`,
+    INVITE: `${BASE_URL}/admin/admins/invite`,
+    RESEND_INVITE: `${BASE_URL}/admin/admins/:id/resend-invite`,
+  },
+  ANALYTICS_ROUTES: {
+    BASE: `${BASE_URL}/analytics`,
+    DASHBOARD: `${BASE_URL}/analytics/dashboard`,
+  },
 } as const;
 
-export const ADMIN_AUTH_ROUTES = {
-  BASE: 'admin/auth',
-  ACCEPT_INVITE: 'accept-invite',
-  LOGIN: 'login',
-  VERIFY_2FA: 'verify-2fa',
-  REFRESH: 'refresh',
-  LOGOUT: 'logout',
-  TWO_FA_SETUP: '2fa/setup',
-  TWO_FA_ENABLE: '2fa/enable',
-  TWO_FA_DISABLE: '2fa/disable',
-} as const;
-
-export const SUBSCRIPTION_ROUTES = {
-  BASE: 'subscriptions',
-  PLANS: 'plans',
-  ME: 'me',
-  UPGRADE: 'upgrade',
-  DOWNGRADE: 'downgrade',
-  CANCEL: 'cancel',
-  CANCEL_SCHEDULED: 'cancel-scheduled',
-} as const;
-
-export const ADMIN_SUBSCRIPTION_ROUTES = {
-  BASE: 'admin/subscriptions',
-} as const;
-
-export const BILLING_ROUTES = {
-  BASE: 'billing',
-  HISTORY: 'history',
-  CARD: 'card',
-  CARD_BY_ID: 'card/:id',
-} as const;
-
-export const POSTAL_ROUTES = {
-  BASE: 'postal-connections',
-  NOVA_POST_BASE: 'nova-post',
-  NOVA_POST_CONNECT: 'connect',
-  NOVA_POSHTA: 'nova-poshta',
-} as const;
-
-export const ONBOARDING_ROUTES = {
-  BASE: 'onboarding',
-  CHECKLIST: 'checklist',
-} as const;
-
-export const SHIPMENT_ROUTES = {
-  BASE: 'shipments',
-  DETAIL_BY_OPERATOR_REF: ':operator/:ref',
-  DRAFTS: 'drafts',
-  DRAFT_BY_ID: 'drafts/:id',
-  DRAFT_DUPLICATE: 'drafts/:id/duplicate-data',
-  TEMPLATES: 'templates',
-  TEMPLATE_BY_ID: 'templates/:id',
-  NOVA_POST: 'nova-post',
-  NOVA_POST_DUPLICATE: 'nova-post/:ttn/duplicate-data',
-  UKRPOSHTA: 'ukrposhta',
-  MIST: 'mist',
-} as const;
+export const AUTH_ROUTES = API_ROUTES.AUTH_ROUTES;
+export const ADMIN_AUTH_ROUTES = API_ROUTES.ADMIN_AUTH_ROUTES;
+export const SUBSCRIPTION_ROUTES = API_ROUTES.SUBSCRIPTION_ROUTES;
+export const ADMIN_SUBSCRIPTION_ROUTES = API_ROUTES.ADMIN_SUBSCRIPTION_ROUTES;
+export const ADMIN_PLAN_ROUTES = API_ROUTES.ADMIN_PLAN_ROUTES;
+export const BILLING_ROUTES = API_ROUTES.BILLING_ROUTES;
+export const POSTAL_ROUTES = API_ROUTES.POSTAL_ROUTES;
+export const ONBOARDING_ROUTES = API_ROUTES.ONBOARDING_ROUTES;
+export const DRAFT_ROUTES = API_ROUTES.DRAFT_ROUTES;
+export const SHIPMENT_ROUTES = API_ROUTES.SHIPMENT_ROUTES;
+export const TEMPLATE_ROUTES = API_ROUTES.TEMPLATE_ROUTES;
+export const PROFILE_ROUTES = API_ROUTES.PROFILE_ROUTES;
+export const USERS_ROUTES = API_ROUTES.USERS_ROUTES;
+export const ADMIN_PROFILE_ROUTES = API_ROUTES.ADMIN_PROFILE_ROUTES;
+export const RECIPIENT_ROUTES = API_ROUTES.RECIPIENT_ROUTES;
+export const NOTIFICATION_ROUTES = API_ROUTES.NOTIFICATION_ROUTES;
+export const ADMIN_USERS_ROUTES = API_ROUTES.ADMIN_USERS_ROUTES;
+export const ADMIN_SERVICES_ROUTES = API_ROUTES.ADMIN_SERVICES_ROUTES;
+export const ADMIN_STATISTICS_ROUTES = API_ROUTES.ADMIN_STATISTICS_ROUTES;
+export const SUPPORT_ROUTES = API_ROUTES.SUPPORT_ROUTES;
+export const ADMIN_SUPPORT_ROUTES = API_ROUTES.ADMIN_SUPPORT_ROUTES;
+export const ADMIN_ADMINS_ROUTES = API_ROUTES.ADMIN_ADMINS_ROUTES;
+export const ANALYTICS_ROUTES = API_ROUTES.ANALYTICS_ROUTES;

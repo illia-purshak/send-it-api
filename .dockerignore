@@ -1,0 +1,9 @@
+pnpm-workspace.yaml
+node_modules
+dist
+generated
+.env
+.env.*
+!.env.example
+.git
+coverage

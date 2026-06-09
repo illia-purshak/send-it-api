@@ -4,7 +4,7 @@ import {
   InternalServerErrorException,
   Logger,
   NotFoundException,
-  UnauthorizedException,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PrismaService } from '../../../../prisma/prisma.service.js';
@@ -13,6 +13,7 @@ import {
   PostalConnectionStatus,
   type PostalService,
 } from '../../../../../generated/prisma/client.js';
+import { PostalConnectionsService } from '../postal-connections.service.js';
 
 interface JwtCacheEntry {
   jwt: string;
@@ -23,11 +24,12 @@ interface JwtCacheEntry {
 export class NovaPostAuthService {
   private readonly logger = new Logger(NovaPostAuthService.name);
   private readonly baseUrl: string;
-  private readonly jwtCache = new Map<number, JwtCacheEntry>();
+  private readonly jwtCache = new Map<string, JwtCacheEntry>();
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
+    private readonly postalConnectionsService: PostalConnectionsService,
   ) {
     this.baseUrl = this.config.getOrThrow<string>('NOVA_POST_BASE_URL');
   }
@@ -37,78 +39,90 @@ export class NovaPostAuthService {
       where: { slug: 'nova-post' },
       create: {
         slug: 'nova-post',
-        name: 'Nova Post',
+        name: 'Нова пошта',
         isActive: true,
       },
       update: {
-        name: 'Nova Post',
         isActive: true,
       },
       select: { id: true },
     });
   }
 
-  async connectNovaPost(userId: number, phone: string): Promise<string> {
-    const postalService = await this.getNovaPostService();
-
+  async requestApiKey(phone: string): Promise<{ apiKey: string }> {
     const response = await fetch(`${this.baseUrl}/test-api-keys`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ phone }),
     });
 
-    if (response.status === 429) {
-      const existing = await this.prisma.db.userPostalConnection.findUnique({
-        where: {
-          userId_postalServiceId: { userId, postalServiceId: postalService.id },
-        },
-      });
-      if (!existing) {
-        throw new BadRequestException(
-          'Nova Post rate limit reached and no existing key on file',
-        );
-      }
-    } else if (response.status === 400) {
+    if (response.status === 400) {
       const body = (await response.json()) as { message?: string };
       throw new BadRequestException(body.message ?? 'Invalid phone format');
-    } else if (response.status === 404) {
-      throw new BadRequestException(
-        'Phone number not registered in Nova Post EBC',
-      );
-    } else if (!response.ok) {
+    }
+    if (response.status === 404) {
+      throw new BadRequestException('Phone number not registered in Nova Post EBC');
+    }
+    if (response.status === 429) {
+      throw new BadRequestException('Nova Post rate limit reached, please try again later');
+    }
+    if (!response.ok) {
       this.logger.error(`Nova Post /test-api-keys returned ${response.status}`);
       throw new InternalServerErrorException('Nova Post API error');
-    } else {
-      const body = (await response.json()) as { apiKey: string };
-      await this.prisma.db.userPostalConnection.upsert({
-        where: {
-          userId_postalServiceId: { userId, postalServiceId: postalService.id },
-        },
-        create: {
-          userId,
-          postalServiceId: postalService.id,
-          apiKey: encryptTotp(body.apiKey),
-          status: PostalConnectionStatus.ACTIVE,
-        },
-        update: {
-          apiKey: encryptTotp(body.apiKey),
-          status: PostalConnectionStatus.ACTIVE,
-        },
-      });
     }
 
-    return this.getJwt(userId);
+    const body = (await response.json()) as { apiKey: string };
+    return { apiKey: body.apiKey };
   }
 
-  async getJwt(userId: number): Promise<string> {
-    const cached = this.jwtCache.get(userId);
-    if (cached && cached.expiresAt > Date.now()) return cached.jwt;
+  async connect(userId: number, apiKey: string): Promise<void> {
+    const authResponse = await fetch(
+      `${this.baseUrl}/clients/authorization?apiKey=${encodeURIComponent(apiKey)}`,
+    );
+
+    if (authResponse.status === 401 || authResponse.status === 403) {
+      throw new BadRequestException('Invalid API key');
+    }
+    if (!authResponse.ok) {
+      this.logger.error(`Nova Post /clients/authorization returned ${authResponse.status}`);
+      throw new InternalServerErrorException('Nova Post API error');
+    }
 
     const postalService = await this.getNovaPostService();
 
-    const connection = await this.prisma.db.userPostalConnection.findUnique({
+    const existing = await this.prisma.db.userPostalConnection.findUnique({
+      where: { userId_postalServiceId: { userId, postalServiceId: postalService.id } },
+      select: { id: true },
+    });
+    if (!existing) {
+      await this.postalConnectionsService.checkOperatorLimit(userId);
+    }
+
+    await this.prisma.db.userPostalConnection.upsert({
       where: {
         userId_postalServiceId: { userId, postalServiceId: postalService.id },
+      },
+      create: {
+        userId,
+        postalServiceId: postalService.id,
+        apiKey: encryptTotp(apiKey),
+        status: PostalConnectionStatus.ACTIVE,
+      },
+      update: {
+        apiKey: encryptTotp(apiKey),
+        status: PostalConnectionStatus.ACTIVE,
+      },
+    });
+  }
+
+  async getJwt(userId: number, postalServiceId: number): Promise<string> {
+    const cacheKey = `${userId}_${postalServiceId}`;
+    const cached = this.jwtCache.get(cacheKey);
+    if (cached && cached.expiresAt > Date.now()) return cached.jwt;
+
+    const connection = await this.prisma.db.userPostalConnection.findUnique({
+      where: {
+        userId_postalServiceId: { userId, postalServiceId },
       },
     });
     if (!connection) {
@@ -122,10 +136,12 @@ export class NovaPostAuthService {
       `${this.baseUrl}/clients/authorization?apiKey=${encodeURIComponent(apiKey)}`,
     );
 
-    if (authResponse.status === 401) {
-      throw new UnauthorizedException(
-        'Nova Post API key is invalid, please reconnect',
-      );
+    if (authResponse.status === 401 || authResponse.status === 403) {
+      await this.postalConnectionsService.markAsInvalid(userId, postalServiceId);
+      throw new UnprocessableEntityException({
+        code: 'CONNECTION_INVALID',
+        message: 'Nova Post API key is invalid, please reconnect',
+      });
     }
     if (!authResponse.ok) {
       this.logger.error(
@@ -135,14 +151,14 @@ export class NovaPostAuthService {
     }
 
     const body = (await authResponse.json()) as { jwt: string };
-    this.jwtCache.set(userId, {
+    this.jwtCache.set(cacheKey, {
       jwt: body.jwt,
       expiresAt: Date.now() + 55 * 60 * 1000,
     });
     return body.jwt;
   }
 
-  invalidateJwt(userId: number): void {
-    this.jwtCache.delete(userId);
+  invalidateJwt(userId: number, postalServiceId: number): void {
+    this.jwtCache.delete(`${userId}_${postalServiceId}`);
   }
 }

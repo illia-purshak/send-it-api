@@ -1,26 +1,80 @@
 import {
-  BadRequestException,
   Injectable,
-  Logger,
   NotFoundException,
-  ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { PostalConnectionStatus, Prisma } from '../../../../generated/prisma/client.js';
+import { PostalConnectionStatus } from '../../../../generated/prisma/enums.js';
 import { ShipmentStatus } from '../../../../generated/prisma/enums.js';
 import { PrismaService } from '../../../prisma/prisma.service.js';
 import type { CreateNovaPostShipmentDto } from '../../../validation/shipments/nova-post-shipment.schema.js';
-import { NovaPostAuthService } from '../postal-connections/nova-post/nova-post-auth.service.js';
-import { PostalConnectionsService } from '../postal-connections/postal-connections.service.js';
-import { getShipmentActionFlags, mapNovaPostStatus } from './shipment-status.mapper.js';
+import { NovaPostApiClient } from '../postal-connections/nova-post/nova-post-api.client.js';
+import {
+  getShipmentActionFlags,
+  mapNovaPostStatus,
+} from './shipment-status.mapper.js';
 import type {
-  DuplicateDataResponse,
   ShipmentDetail,
   ShipmentListItem,
+  TrackingHistoryItem,
 } from './shipments.types.js';
 
-interface NovaPostShipmentResponse {
+// ─── Nova Post API response shapes ───────────────────────────────────────────
+
+interface NovaPostAddressParts {
+  city?: string;
+  region?: string;
+  street?: string;
+  building?: string;
+  flat?: string;
+  postCode?: string;
+  countryCode?: string;
+  note?: string;
+}
+
+interface NovaPostParty {
+  name: string;
+  phone: string;
+  email: string;
+  countryCode: string;
+  address: string;
+  addressParts: NovaPostAddressParts;
+}
+
+interface NovaPostTrackingEntry {
+  code: string;
+  code_name: string;
+  country_code: string;
+  settlement: string;
+  date: string;
+}
+
+interface NovaPostShipmentItem {
+  id: string;
+  number: string;
+  status: string;
+  scheduledDeliveryDate: string | null;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt: string | null;
+  parcelsAmount: number;
+  totalWeight: number;
+  totalInsuranceCost: number;
+  totalCost: number;
+  sender: NovaPostParty;
+  recipient: NovaPostParty;
+  tracking: NovaPostTrackingEntry[];
+}
+
+interface NovaPostPaginatedResponse {
+  current_page: number;
+  last_page: number;
+  per_page: number;
+  total: number;
+  items: NovaPostShipmentItem[];
+}
+
+// POST /shipments 201 response
+interface NovaPostCreateResponse {
   id: string;
   number: string;
   status: string;
@@ -30,117 +84,58 @@ interface NovaPostShipmentResponse {
   createdAt: string;
 }
 
+// DELETE /shipments/{id} 200 response
+interface NovaPostDeleteResponse {
+  deletedAt: string;
+}
+
+// ─── Options ─────────────────────────────────────────────────────────────────
+
 interface GetShipmentsOptions {
   suppressMissingConnection: boolean;
 }
 
+// ─── Service ─────────────────────────────────────────────────────────────────
+
+const MAX_PAGES = 10;
+const PAGE_SIZE = 100;
+
 @Injectable()
 export class NovaPostShipmentsService {
-  private readonly logger = new Logger(NovaPostShipmentsService.name);
-  private readonly baseUrl: string;
-
   constructor(
     private readonly prisma: PrismaService,
-    private readonly config: ConfigService,
-    private readonly novaPostAuth: NovaPostAuthService,
-    private readonly postalConnections: PostalConnectionsService,
-  ) {
-    this.baseUrl = this.config.getOrThrow<string>('NOVA_POST_BASE_URL');
-  }
+    private readonly apiClient: NovaPostApiClient,
+  ) {}
 
   async createShipment(userId: number, dto: CreateNovaPostShipmentDto) {
     const postalService = await this.getNovaPostPostalService();
-
-    if (postalService) {
-      const connection = await this.prisma.db.userPostalConnection.findUnique({
-        where: {
-          userId_postalServiceId: {
-            userId,
-            postalServiceId: postalService.id,
-          },
-        },
-      });
-      if (!connection || connection.status !== PostalConnectionStatus.ACTIVE) {
-        throw new UnauthorizedException(
-          'Nova Post connection is not active. Please connect or reconnect in your profile.',
-        );
-      }
+    if (!postalService) {
+      throw new NotFoundException('Nova Post service is not available.');
     }
 
-    const jwt = await this.novaPostAuth.getJwt(userId);
+    await this.requireActiveConnection(userId, postalService.id);
 
-    const { draftId, ...shipmentPayload } = dto;
+    const { draftId, invoice, ...rest } = dto;
+    const shipmentPayload = {
+      ...rest,
+      ...(invoice != null ? { invoice } : {}),
+    };
 
-    let response: Response;
-    try {
-      response = await fetch(`${this.baseUrl}/shipments`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: jwt,
-        },
-        body: JSON.stringify(shipmentPayload),
-      });
-    } catch {
-      throw new ServiceUnavailableException(
-        'Could not reach Nova Post. Please try again.',
-      );
-    }
+    const body = await this.apiClient.request<NovaPostCreateResponse>(
+      userId,
+      postalService.id,
+      'POST',
+      '/shipments',
+      undefined,
+      shipmentPayload,
+    );
 
-    if (response.status === 401) {
-      await this.handleInvalidConnection(userId, postalService?.id);
-      throw new BadRequestException({
-        code: 'CONNECTION_INVALID',
-        operator: 'nova-post',
-        message:
-          'Your Nova Post connection is no longer valid. Please reconnect.',
-      });
-    }
-
-    if (response.status === 422) {
-      const body = (await response.json()) as { errors?: unknown };
-      throw new BadRequestException({
-        code: 'OPERATOR_VALIDATION_ERROR',
-        errors: body.errors ?? body,
-      });
-    }
-
-    if (response.status === 503 || !response.ok) {
-      this.logger.error(`Nova Post /shipments returned ${response.status}`);
-      throw new ServiceUnavailableException(
-        'An error occurred while creating the shipment. Please try again.',
-      );
-    }
-
-    const body = (await response.json()) as NovaPostShipmentResponse;
     const normalizedStatus = mapNovaPostStatus(body.status);
-
-    if (postalService) {
-      await this.upsertShipmentMetadata(userId, postalService.id, {
-        operatorRef: body.number,
-        rawStatus: body.status,
-        normalizedStatus,
-        recipientName: dto.recipient.name,
-        declaredValue: dto.parcels.reduce(
-          (sum, parcel) => sum + parcel.insuranceCost,
-          0,
-        ),
-        operatorCreatedAt: this.parseDate(body.createdAt),
-        metadata: {
-          remoteId: body.id,
-          scheduledDeliveryDate: body.scheduledDeliveryDate,
-          cost: body.cost,
-          parcelsAmount: body.parcelsAmount,
-        },
-      });
-    }
 
     if (draftId) {
       await this.prisma.db.shipmentDraft
         .delete({ where: { id: draftId, userId } })
-        .catch(() => {
-          // draft may already be deleted - ignore
-        });
+        .catch(() => {});
     }
 
     return {
@@ -160,164 +155,179 @@ export class NovaPostShipmentsService {
     options: GetShipmentsOptions,
   ): Promise<ShipmentListItem[]> {
     const postalService = await this.getNovaPostPostalService();
-    if (!postalService) {
-      return [];
-    }
+    if (!postalService) return [];
 
     const connection = await this.getActiveConnection(userId, postalService.id);
     if (!connection) {
-      if (options.suppressMissingConnection) {
-        return [];
-      }
+      if (options.suppressMissingConnection) return [];
       throw new UnauthorizedException(
         'Nova Post connection is not active. Please connect or reconnect in your profile.',
       );
     }
 
-    const rawShipments = await this.fetchShipmentsFromApi(userId);
-    const cachedShipments = await this.prisma.db.shipment.findMany({
-      where: { userId, postalServiceId: postalService.id },
-    });
-    const cachedByRef = new Map(
-      cachedShipments.map((shipment) => [shipment.operatorRef, shipment]),
-    );
+    const rawShipments = await this.fetchAllShipments(userId, postalService.id);
 
-    const normalizedShipments: ShipmentListItem[] = [];
-    for (const shipment of rawShipments) {
-      const ref = this.extractOperatorRef(shipment);
-      if (!ref) continue;
-
-      const normalized = this.normalizeRemoteShipment(
-        shipment,
+    return rawShipments.map((item) =>
+      this.normalizeShipment(
+        item,
         postalService.id,
         postalService.name,
         postalService.logoUrl,
-        cachedByRef.get(ref),
-      );
-
-      await this.upsertShipmentMetadata(userId, postalService.id, {
-        operatorRef: normalized.ref!,
-        rawStatus: normalized.rawStatus,
-        normalizedStatus: normalized.normalizedStatus,
-        recipientName: normalized.recipientName,
-        declaredValue: normalized.declaredValue,
-        operatorCreatedAt: normalized.createdAt,
-        metadata: shipment,
-      });
-
-      normalizedShipments.push(normalized);
-    }
-
-    return normalizedShipments;
+      ),
+    );
   }
 
   async getShipmentDetail(userId: number, ref: string): Promise<ShipmentDetail> {
     const postalService = await this.getNovaPostPostalService();
-    if (!postalService) {
-      throw new NotFoundException('Shipment not found');
-    }
+    if (!postalService) throw new NotFoundException('Shipment not found');
 
-    const shipment = await this.findRemoteShipmentByRef(userId, ref);
-    const cached = await this.prisma.db.shipment.findUnique({
-      where: {
-        userId_postalServiceId_operatorRef: {
-          userId,
-          postalServiceId: postalService.id,
-          operatorRef: ref,
-        },
-      },
-    });
-
-    const normalized = this.normalizeRemoteShipment(
-      shipment,
+    const item = await this.fetchShipmentByNumber(userId, postalService.id, ref);
+    const normalized = this.normalizeShipment(
+      item,
       postalService.id,
       postalService.name,
       postalService.logoUrl,
-      cached,
     );
 
-    await this.upsertShipmentMetadata(userId, postalService.id, {
-      operatorRef: normalized.ref!,
-      rawStatus: normalized.rawStatus,
-      normalizedStatus: normalized.normalizedStatus,
-      recipientName: normalized.recipientName,
-      declaredValue: normalized.declaredValue,
-      operatorCreatedAt: normalized.createdAt,
-      metadata: shipment,
-    });
-
-    const shipmentRecord = this.asRecord(shipment);
-    const recipient = this.getNestedRecord(shipmentRecord, 'recipient');
-    const addressParts = this.getNestedRecord(recipient, 'addressParts');
+    const trackingHistory = this.mapTrackingHistory(item.tracking ?? []);
 
     return {
       kind: 'shipment',
       operator: 'nova-post',
-      ref: normalized.ref!,
-      ttn: normalized.ttn!,
+      ref: item.number,
+      ttn: item.number,
       postalServiceId: postalService.id,
       postalServiceName: postalService.name,
       postalServiceLogoUrl: postalService.logoUrl ?? null,
       normalizedStatus: normalized.normalizedStatus,
-      rawStatus: normalized.rawStatus,
-      recipientName: normalized.recipientName,
-      recipientPhone:
-        this.getStringField(recipient, ['phone']) ??
-        this.getStringField(shipmentRecord, ['recipientPhone']),
-      recipientEmail:
-        this.getStringField(recipient, ['email']) ??
-        this.getStringField(shipmentRecord, ['recipientEmail']),
-      deliveryAddress:
-        this.composeAddress(addressParts) ??
-        this.getStringField(shipmentRecord, [
-          'deliveryAddress',
-          'branch',
-          'address',
-        ]),
-      declaredValue: normalized.declaredValue,
-      weight: this.extractWeight(shipmentRecord),
-      createdAt: normalized.createdAt,
+      rawStatus: item.status,
+      recipientName: item.recipient.name || null,
+      recipientPhone: item.recipient.phone || null,
+      recipientEmail: item.recipient.email || null,
+      deliveryAddress: this.composeAddress(item.recipient.addressParts),
+      declaredValue: item.totalInsuranceCost,
+      weight: item.totalWeight,
+      scheduledDeliveryDate: this.parseDate(item.scheduledDeliveryDate),
+      createdAt: this.parseDate(item.createdAt),
       lastSyncedAt: new Date(),
-      metadata: shipment,
+      trackingHistory,
+      metadata: item,
       ...getShipmentActionFlags(normalized.normalizedStatus),
     };
   }
 
-  async getShipmentDuplicateData(
-    userId: number,
-    ttn: string,
-  ): Promise<DuplicateDataResponse> {
+  async deleteShipment(userId: number, ref: string): Promise<{ deletedAt: string }> {
     const postalService = await this.getNovaPostPostalService();
-    if (!postalService) {
-      throw new NotFoundException('Shipment not found');
+    if (!postalService) throw new NotFoundException('Nova Post service is not available.');
+
+    await this.requireActiveConnection(userId, postalService.id);
+
+    const result = await this.apiClient.request<NovaPostDeleteResponse>(
+      userId,
+      postalService.id,
+      'DELETE',
+      `/shipments/${encodeURIComponent(ref)}`,
+    );
+
+    return { deletedAt: result.deletedAt };
+  }
+
+  // ─── Private helpers ──────────────────────────────────────────────────────
+
+  private async fetchAllShipments(
+    userId: number,
+    postalServiceId: number,
+  ): Promise<NovaPostShipmentItem[]> {
+    const firstPage = await this.apiClient.request<NovaPostPaginatedResponse>(
+      userId,
+      postalServiceId,
+      'GET',
+      '/shipments',
+      { limit: PAGE_SIZE, page: 1 },
+    );
+
+    const items = [...firstPage.items];
+    const pagesToFetch = Math.min(firstPage.last_page, MAX_PAGES);
+
+    if (pagesToFetch > 1) {
+      const pageNumbers = Array.from(
+        { length: pagesToFetch - 1 },
+        (_, i) => i + 2,
+      );
+      const pages = await Promise.all(
+        pageNumbers.map((page) =>
+          this.apiClient.request<NovaPostPaginatedResponse>(
+            userId,
+            postalServiceId,
+            'GET',
+            '/shipments',
+            { limit: PAGE_SIZE, page },
+          ),
+        ),
+      );
+      for (const page of pages) {
+        items.push(...page.items);
+      }
     }
 
-    const shipment = await this.findRemoteShipmentByRef(userId, ttn);
+    return items;
+  }
+
+  private async fetchShipmentByNumber(
+    userId: number,
+    postalServiceId: number,
+    number: string,
+  ): Promise<NovaPostShipmentItem> {
+    const response = await this.apiClient.request<NovaPostPaginatedResponse>(
+      userId,
+      postalServiceId,
+      'GET',
+      '/shipments',
+      { 'numbers[]': [number], limit: 1 },
+    );
+
+    const item = response.items[0];
+    if (!item) throw new NotFoundException('Shipment not found');
+    return item;
+  }
+
+  private normalizeShipment(
+    item: NovaPostShipmentItem,
+    postalServiceId: number,
+    postalServiceName: string,
+    postalServiceLogoUrl: string | null,
+  ): ShipmentListItem {
+    const rawStatus = item.status ?? null;
+    const normalizedStatus = rawStatus
+      ? mapNovaPostStatus(rawStatus)
+      : ShipmentStatus.UNKNOWN;
 
     return {
-      postalServiceId: postalService.id,
-      formData: this.extractFormDataForDuplicate(shipment),
+      kind: 'shipment',
+      operator: 'nova-post',
+      draftId: null,
+      ref: item.number,
+      ttn: item.number,
+      postalServiceId,
+      operatorName: postalServiceName,
+      operatorLogoUrl: postalServiceLogoUrl ?? null,
+      normalizedStatus,
+      rawStatus,
+      recipientName: item.recipient.name || null,
+      createdAt: this.parseDate(item.createdAt) ?? new Date(),
+      declaredValue: item.totalInsuranceCost ?? null,
+      ...getShipmentActionFlags(normalizedStatus),
     };
   }
 
-  private async handleInvalidConnection(
-    userId: number,
-    postalServiceId: number | undefined,
-  ) {
-    this.novaPostAuth.invalidateJwt(userId);
-
-    if (postalServiceId) {
-      await this.postalConnections.markAsInvalid(userId, postalServiceId);
-    }
-
-    await this.prisma.db.notification.create({
-      data: {
-        userId,
-        type: 'SYSTEM',
-        title: 'Nova Post connection invalid',
-        body: 'Your Nova Post API key is no longer valid. Please reconnect it in your profile to continue creating shipments.',
-      },
-    });
+  private mapTrackingHistory(entries: NovaPostTrackingEntry[]): TrackingHistoryItem[] {
+    return entries.map((e) => ({
+      code: e.code,
+      codeName: e.code_name,
+      countryCode: e.country_code,
+      settlement: e.settlement,
+      date: new Date(e.date),
+    }));
   }
 
   private async getNovaPostPostalService() {
@@ -329,320 +339,36 @@ export class NovaPostShipmentsService {
 
   private async getActiveConnection(userId: number, postalServiceId: number) {
     const connection = await this.prisma.db.userPostalConnection.findUnique({
-      where: {
-        userId_postalServiceId: {
-          userId,
-          postalServiceId,
-        },
-      },
+      where: { userId_postalServiceId: { userId, postalServiceId } },
     });
-
-    return connection && connection.status === PostalConnectionStatus.ACTIVE
-      ? connection
-      : null;
+    return connection?.status === PostalConnectionStatus.ACTIVE ? connection : null;
   }
 
-  private async fetchShipmentsFromApi(userId: number): Promise<unknown[]> {
-    const postalService = await this.getNovaPostPostalService();
-    const jwt = await this.novaPostAuth.getJwt(userId);
-
-    let response: Response;
-    try {
-      response = await fetch(`${this.baseUrl}/shipments`, {
-        method: 'GET',
-        headers: {
-          Authorization: jwt,
-        },
-      });
-    } catch {
-      throw new ServiceUnavailableException(
-        'Could not reach Nova Post. Please try again.',
+  private async requireActiveConnection(userId: number, postalServiceId: number) {
+    const connection = await this.getActiveConnection(userId, postalServiceId);
+    if (!connection) {
+      throw new UnauthorizedException(
+        'Nova Post connection is not active. Please connect or reconnect in your profile.',
       );
     }
-
-    if (response.status === 401) {
-      await this.handleInvalidConnection(userId, postalService?.id);
-      throw new BadRequestException({
-        code: 'CONNECTION_INVALID',
-        operator: 'nova-post',
-        message:
-          'Your Nova Post connection is no longer valid. Please reconnect.',
-      });
-    }
-
-    if (!response.ok) {
-      this.logger.error(`Nova Post GET /shipments returned ${response.status}`);
-      throw new ServiceUnavailableException(
-        'Could not reach Nova Post. Please try again.',
-      );
-    }
-
-    const body = (await response.json()) as unknown;
-
-    if (Array.isArray(body)) {
-      return body;
-    }
-    if (body && typeof body === 'object') {
-      const record = body as Record<string, unknown>;
-      if (Array.isArray(record['shipments'])) return record['shipments'];
-      if (Array.isArray(record['items'])) return record['items'];
-      if (Array.isArray(record['data'])) return record['data'];
-    }
-
-    return [];
   }
 
-  private async findRemoteShipmentByRef(userId: number, ref: string) {
-    const shipments = await this.fetchShipmentsFromApi(userId);
-    const match = shipments.find(
-      (shipment) => this.extractOperatorRef(shipment) === ref,
-    );
-
-    if (!match) {
-      throw new NotFoundException('Shipment not found');
-    }
-
-    return match;
+  private composeAddress(parts: NovaPostAddressParts): string | null {
+    const segments = [
+      parts.countryCode,
+      parts.region,
+      parts.city,
+      parts.street,
+      parts.building,
+      parts.flat,
+      parts.postCode,
+    ].filter((p): p is string => Boolean(p));
+    return segments.length ? segments.join(', ') : null;
   }
 
-  private normalizeRemoteShipment(
-    shipment: unknown,
-    postalServiceId: number,
-    postalServiceName: string,
-    postalServiceLogoUrl: string | null,
-    cachedShipment?: {
-      rawStatus: string | null;
-      normalizedStatus: ShipmentStatus;
-      recipientName: string | null;
-      declaredValue: Prisma.Decimal | null;
-      operatorCreatedAt: Date | null;
-    } | null,
-  ): ShipmentListItem {
-    const record = this.asRecord(shipment);
-    const rawStatus =
-      this.getStringField(record, ['status']) ?? cachedShipment?.rawStatus ?? null;
-    const normalizedStatus =
-      rawStatus !== null
-        ? mapNovaPostStatus(rawStatus)
-        : cachedShipment?.normalizedStatus ?? ShipmentStatus.UNKNOWN;
-    const flags = getShipmentActionFlags(normalizedStatus);
-    const recipient = this.getNestedRecord(record, 'recipient');
-
-    return {
-      kind: 'shipment',
-      operator: 'nova-post',
-      draftId: null,
-      ref: this.extractOperatorRef(record),
-      ttn: this.extractOperatorRef(record),
-      postalServiceId,
-      operatorName: postalServiceName,
-      operatorLogoUrl: postalServiceLogoUrl ?? null,
-      normalizedStatus,
-      rawStatus,
-      recipientName:
-        this.getStringField(recipient, ['name']) ??
-        this.getStringField(record, ['recipientName']) ??
-        cachedShipment?.recipientName ??
-        null,
-      createdAt:
-        this.extractCreatedAt(record) ??
-        cachedShipment?.operatorCreatedAt ??
-        new Date(),
-      declaredValue:
-        this.extractDeclaredValue(record) ??
-        (cachedShipment?.declaredValue
-          ? Number(cachedShipment.declaredValue)
-          : null),
-      ...flags,
-    };
-  }
-
-  private extractOperatorRef(shipment: unknown) {
-    const record = this.asRecord(shipment);
-    return (
-      this.getStringField(record, ['number', 'ttn', 'trackingNumber', 'ref']) ??
-      this.getIdAsString(record['id'])
-    );
-  }
-
-  private extractCreatedAt(shipment: unknown) {
-    const record = this.asRecord(shipment);
-    return this.parseDate(
-      this.getStringField(record, ['createdAt', 'dateCreated', 'created_at']),
-    );
-  }
-
-  private extractDeclaredValue(shipment: unknown) {
-    const record = this.asRecord(shipment);
-    const directValue =
-      this.getNumericField(record, ['declaredValue', 'cost', 'value']) ??
-      this.getNumericField(this.getNestedRecord(record, 'invoice'), ['cost']);
-
-    if (directValue !== null) {
-      return directValue;
-    }
-
-    const parcels = Array.isArray(record['parcels']) ? record['parcels'] : [];
-    if (parcels.length) {
-      return parcels.reduce((sum, parcel) => {
-        const insurance = this.getNumericField(this.asRecord(parcel), [
-          'insuranceCost',
-        ]);
-        return sum + (insurance ?? 0);
-      }, 0);
-    }
-
-    return null;
-  }
-
-  private extractWeight(shipment: unknown) {
-    const record = this.asRecord(shipment);
-    const directWeight = this.getNumericField(record, ['weight', 'actualWeight']);
-    if (directWeight !== null) return directWeight;
-
-    const parcels = Array.isArray(record['parcels']) ? record['parcels'] : [];
-    if (!parcels.length) return null;
-
-    return parcels.reduce((sum, parcel) => {
-      const weight = this.getNumericField(this.asRecord(parcel), [
-        'actualWeight',
-        'weight',
-      ]);
-      return sum + (weight ?? 0);
-    }, 0);
-  }
-
-  private extractFormDataForDuplicate(shipment: unknown) {
-    const record = this.asRecord(shipment);
-    const formData: Record<string, unknown> = {};
-
-    for (const key of [
-      'clientOrder',
-      'note',
-      'deliveryType',
-      'payerType',
-      'payerContractNumber',
-      'sender',
-      'recipient',
-      'parcels',
-      'invoice',
-    ]) {
-      if (record[key] !== undefined) {
-        formData[key] = record[key];
-      }
-    }
-
-    return formData;
-  }
-
-  private async upsertShipmentMetadata(
-    userId: number,
-    postalServiceId: number,
-    shipment: {
-      operatorRef: string;
-      rawStatus: string | null;
-      normalizedStatus: ShipmentStatus;
-      recipientName: string | null;
-      declaredValue: number | null;
-      operatorCreatedAt: Date | null;
-      metadata: unknown;
-    },
-  ) {
-    return this.prisma.db.shipment.upsert({
-      where: {
-        userId_postalServiceId_operatorRef: {
-          userId,
-          postalServiceId,
-          operatorRef: shipment.operatorRef,
-        },
-      },
-      create: {
-        userId,
-        postalServiceId,
-        operatorRef: shipment.operatorRef,
-        rawStatus: shipment.rawStatus,
-        normalizedStatus: shipment.normalizedStatus,
-        recipientName: shipment.recipientName,
-        declaredValue: shipment.declaredValue,
-        operatorCreatedAt: shipment.operatorCreatedAt,
-        lastSyncedAt: new Date(),
-        metadata: this.toJsonValue(shipment.metadata),
-      },
-      update: {
-        rawStatus: shipment.rawStatus,
-        normalizedStatus: shipment.normalizedStatus,
-        recipientName: shipment.recipientName,
-        declaredValue: shipment.declaredValue,
-        operatorCreatedAt: shipment.operatorCreatedAt,
-        lastSyncedAt: new Date(),
-        metadata: this.toJsonValue(shipment.metadata),
-      },
-    });
-  }
-
-  private toJsonValue(
-    value: unknown,
-  ): Prisma.InputJsonValue | Prisma.NullableJsonNullValueInput {
-    if (value === null || value === undefined) {
-      return Prisma.JsonNull;
-    }
-
-    return value as Prisma.InputJsonValue;
-  }
-
-  private asRecord(value: unknown) {
-    return value && typeof value === 'object' && !Array.isArray(value)
-      ? (value as Record<string, unknown>)
-      : {};
-  }
-
-  private getNestedRecord(source: Record<string, unknown>, key: string) {
-    return this.asRecord(source[key]);
-  }
-
-  private getStringField(source: Record<string, unknown>, keys: string[]) {
-    for (const key of keys) {
-      const value = source[key];
-      if (typeof value === 'string' && value.trim()) return value;
-    }
-    return null;
-  }
-
-  private getNumericField(source: Record<string, unknown>, keys: string[]) {
-    for (const key of keys) {
-      const value = source[key];
-      if (typeof value === 'number' && Number.isFinite(value)) return value;
-      if (typeof value === 'string') {
-        const parsed = Number(value);
-        if (Number.isFinite(parsed)) return parsed;
-      }
-    }
-    return null;
-  }
-
-  private parseDate(value: string | null) {
+  private parseDate(value: string | null | undefined): Date | null {
     if (!value) return null;
     const parsed = new Date(value);
     return Number.isNaN(parsed.getTime()) ? null : parsed;
-  }
-
-  private getIdAsString(value: unknown) {
-    if (typeof value === 'string' && value.trim()) return value;
-    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
-    return null;
-  }
-
-  private composeAddress(addressParts: Record<string, unknown>) {
-    const parts = [
-      this.getStringField(addressParts, ['countryCode']),
-      this.getStringField(addressParts, ['region']),
-      this.getStringField(addressParts, ['city']),
-      this.getStringField(addressParts, ['street']),
-      this.getStringField(addressParts, ['building']),
-      this.getStringField(addressParts, ['flat']),
-      this.getStringField(addressParts, ['postCode']),
-    ].filter((part): part is string => Boolean(part));
-
-    return parts.length ? parts.join(', ') : null;
   }
 }
