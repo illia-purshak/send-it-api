@@ -26,6 +26,7 @@ import { SupportModule } from './module/user/support/support.module.js';
 import { AdminAdminsModule } from './module/admin/admins/admin-admins.module.js';
 import { AdminPlansModule } from './module/admin/plans/admin-plans.module.js';
 import { AdminStatisticsModule } from './module/admin/statistics/admin-statistics.module.js';
+import { AnalyticsModule } from './module/user/analytics/analytics.module.js';
 
 @Module({
   imports: [
@@ -54,6 +55,7 @@ import { AdminStatisticsModule } from './module/admin/statistics/admin-statistic
     AdminAdminsModule,
     AdminPlansModule,
     AdminStatisticsModule,
+    AnalyticsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

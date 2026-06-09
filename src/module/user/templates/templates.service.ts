@@ -1,12 +1,22 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import type { ZodTypeAny } from 'zod';
 import type { Prisma } from '../../../../generated/prisma/client.js';
 import { PrismaService } from '../../../prisma/prisma.service.js';
 import { buildPaginatedResponse } from '../../../utils/pagination.util.js';
+import { MeestTemplateDataSchema } from '../../../validation/shipments/meest-shipment.schema.js';
+import { NovaPostTemplateDataSchema } from '../../../validation/shipments/nova-post-shipment.schema.js';
+import { UkrposhtaTemplateDataSchema } from '../../../validation/shipments/ukrposhta-shipment.schema.js';
 import type {
   CreateTemplateDto,
   ListTemplatesQueryDto,
   UpdateTemplateDto,
 } from '../../../validation/templates/template.schema.js';
+
+const TEMPLATE_DATA_SCHEMAS: Record<string, ZodTypeAny> = {
+  'nova-post': NovaPostTemplateDataSchema,
+  ukrposhta: UkrposhtaTemplateDataSchema,
+  meest: MeestTemplateDataSchema,
+};
 
 @Injectable()
 export class TemplatesService {
@@ -53,7 +63,26 @@ export class TemplatesService {
     return template;
   }
 
-  createTemplate(userId: number, dto: CreateTemplateDto) {
+  private async resolveAndValidateTemplateData(
+    postalServiceId: number | undefined | null,
+    templateData: Record<string, unknown>,
+  ): Promise<string | null> {
+    if (!postalServiceId) return null;
+    const service = await this.prisma.db.postalService.findUnique({
+      where: { id: postalServiceId },
+      select: { slug: true },
+    });
+    if (!service) throw new NotFoundException('Postal service not found');
+    const schema = TEMPLATE_DATA_SCHEMAS[service.slug];
+    if (schema) {
+      const result = schema.safeParse(templateData);
+      if (!result.success) throw new BadRequestException(result.error.issues);
+    }
+    return service.slug;
+  }
+
+  async createTemplate(userId: number, dto: CreateTemplateDto) {
+    await this.resolveAndValidateTemplateData(dto.postalServiceId, dto.templateData);
     return this.prisma.db.shipmentTemplate.create({
       data: {
         userId,
@@ -68,14 +97,18 @@ export class TemplatesService {
   }
 
   async updateTemplate(userId: number, id: number, dto: UpdateTemplateDto) {
-    await this.getTemplateById(userId, id);
+    const existing = await this.getTemplateById(userId, id);
 
     const data: Prisma.ShipmentTemplateUncheckedUpdateInput = {};
     if (dto.name !== undefined) data.name = dto.name;
     if (dto.description !== undefined) data.description = dto.description;
     if (dto.postalServiceId !== undefined) data.postalServiceId = dto.postalServiceId;
     if (dto.shipmentType !== undefined) data.shipmentType = dto.shipmentType;
-    if (dto.templateData !== undefined) data.templateData = dto.templateData as Prisma.InputJsonValue;
+    if (dto.templateData !== undefined) {
+      const effectiveServiceId = dto.postalServiceId ?? (existing.postalService as { id: number } | null)?.id;
+      await this.resolveAndValidateTemplateData(effectiveServiceId, dto.templateData);
+      data.templateData = dto.templateData as Prisma.InputJsonValue;
+    }
 
     return this.prisma.db.shipmentTemplate.update({
       where: { id },
@@ -97,4 +130,5 @@ export class TemplatesService {
       select: { id: true, usageCount: true },
     });
   }
+
 }

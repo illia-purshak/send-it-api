@@ -130,4 +130,5 @@ export class TemplatesController {
   ) {
     return this.templatesService.incrementUsage(user.id, id);
   }
+
 }

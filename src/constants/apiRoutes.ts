@@ -125,6 +125,10 @@ const API_ROUTES = {
     INVITE: `${BASE_URL}/admin/admins/invite`,
     RESEND_INVITE: `${BASE_URL}/admin/admins/:id/resend-invite`,
   },
+  ANALYTICS_ROUTES: {
+    BASE: `${BASE_URL}/analytics`,
+    DASHBOARD: `${BASE_URL}/analytics/dashboard`,
+  },
 } as const;
 
 export const AUTH_ROUTES = API_ROUTES.AUTH_ROUTES;
@@ -149,3 +153,4 @@ export const ADMIN_STATISTICS_ROUTES = API_ROUTES.ADMIN_STATISTICS_ROUTES;
 export const SUPPORT_ROUTES = API_ROUTES.SUPPORT_ROUTES;
 export const ADMIN_SUPPORT_ROUTES = API_ROUTES.ADMIN_SUPPORT_ROUTES;
 export const ADMIN_ADMINS_ROUTES = API_ROUTES.ADMIN_ADMINS_ROUTES;
+export const ANALYTICS_ROUTES = API_ROUTES.ANALYTICS_ROUTES;

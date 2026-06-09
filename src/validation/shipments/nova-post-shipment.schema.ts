@@ -113,6 +113,20 @@ const ShipmentServiceSchema = z.object({
     .optional(),
 });
 
+export const NovaPostTemplateDataSchema = z.object({
+  status: z.literal('ReadyToShip').optional(),
+  clientOrder: z.string().max(50).optional(),
+  note: z.string().max(255).optional(),
+  deliveryType: z.enum(['standard', 'economy', 'express']).optional(),
+  payerType: z.enum(['Sender', 'Recipient', 'ThirdPerson']).optional(),
+  payerContractNumber: z.string().min(2).max(20).nullable().optional(),
+  sender: SenderSchema.partial().optional(),
+  recipient: RecipientSchema.partial().optional(),
+  parcels: z.array(ParcelSchema.partial()).optional(),
+  invoice: InvoiceSchema.optional(),
+  services: z.array(ShipmentServiceSchema.partial()).optional(),
+});
+
 export const CreateNovaPostShipmentSchema = z.object({
   status: z.literal('ReadyToShip').optional(),
   clientOrder: z.string().max(50).optional(),
