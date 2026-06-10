@@ -115,6 +115,36 @@ export class AdminSubscriptionService {
     });
   }
 
+  async suspendBalance(balanceId: number) {
+    const balance = await this.prisma.db.userSubscriptionBalance.findUnique({
+      where: { id: balanceId },
+    });
+    if (!balance) throw new NotFoundException('Subscription balance not found');
+    if (balance.status !== SubscriptionBalanceStatus.ACTIVE)
+      throw new BadRequestException('Only ACTIVE subscriptions can be suspended');
+
+    return this.prisma.db.userSubscriptionBalance.update({
+      where: { id: balanceId },
+      data: { status: SubscriptionBalanceStatus.PAUSED, pausedAt: new Date() },
+      include: { plan: true },
+    });
+  }
+
+  async reactivateBalance(balanceId: number) {
+    const balance = await this.prisma.db.userSubscriptionBalance.findUnique({
+      where: { id: balanceId },
+    });
+    if (!balance) throw new NotFoundException('Subscription balance not found');
+    if (balance.status !== SubscriptionBalanceStatus.PAUSED)
+      throw new BadRequestException('Only PAUSED subscriptions can be reactivated');
+
+    return this.prisma.db.userSubscriptionBalance.update({
+      where: { id: balanceId },
+      data: { status: SubscriptionBalanceStatus.ACTIVE, pausedAt: null },
+      include: { plan: true },
+    });
+  }
+
   async setDiscount(balanceId: number, amount: number, discountType: DiscountType) {
     const balance = await this.prisma.db.userSubscriptionBalance.findUnique({
       where: { id: balanceId },
