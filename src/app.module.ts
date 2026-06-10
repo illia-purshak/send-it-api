@@ -20,17 +20,18 @@ import { RecipientsModule } from './module/user/recipients/recipients.module.js'
 import { NotificationsModule } from './module/user/notifications/notifications.module.js';
 import { AdminProfileModule } from './module/admin/profile/profile.module.js';
 import { AdminUsersModule } from './module/admin/users/admin-users.module.js';
-import { AdminServicesModule } from './module/admin/services/admin-services.module.js';
 import { AdminSupportModule } from './module/admin/support/admin-support.module.js';
 import { SupportModule } from './module/user/support/support.module.js';
 import { AdminAdminsModule } from './module/admin/admins/admin-admins.module.js';
 import { AdminPlansModule } from './module/admin/plans/admin-plans.module.js';
 import { AdminStatisticsModule } from './module/admin/statistics/admin-statistics.module.js';
 import { AnalyticsModule } from './module/user/analytics/analytics.module.js';
+import { MailModule } from './module/mail/mail.module.js';
 
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true }),
+    MailModule,
     ScheduleModule.forRoot(),
     PrismaModule,
     UserAuthModule,
@@ -50,7 +51,6 @@ import { AnalyticsModule } from './module/user/analytics/analytics.module.js';
     SupportModule,
     AdminProfileModule,
     AdminUsersModule,
-    AdminServicesModule,
     AdminSupportModule,
     AdminAdminsModule,
     AdminPlansModule,

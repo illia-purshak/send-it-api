@@ -75,6 +75,10 @@ export class AdminSubscriptionController {
           dto.amount!,
           dto.discountType as DiscountType,
         );
+      case 'suspend':
+        return this.adminSubscriptionService.suspendBalance(id);
+      case 'reactivate':
+        return this.adminSubscriptionService.reactivateBalance(id);
     }
   }
 }

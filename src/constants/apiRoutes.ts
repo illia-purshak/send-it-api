@@ -96,6 +96,10 @@ const API_ROUTES = {
   ADMIN_USERS_ROUTES: {
     BASE: `${BASE_URL}/admin/users`,
     BY_ID: `${BASE_URL}/admin/users/:id`,
+    SUBSCRIPTION: `${BASE_URL}/admin/users/:id/subscription`,
+    SUBSCRIPTION_HISTORY: `${BASE_URL}/admin/users/:id/subscription/history`,
+    SUBSCRIPTION_BY_BALANCE: `${BASE_URL}/admin/users/:id/subscription/:balanceId`,
+    POSTAL_CONNECTION_BY_ID: `${BASE_URL}/admin/users/:id/postal-connections/:connectionId`,
   },
   ADMIN_SERVICES_ROUTES: {
     BASE: `${BASE_URL}/admin/services`,

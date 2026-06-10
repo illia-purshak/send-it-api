@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { PrismaService } from '../../../prisma/prisma.service.js';
 import { generateToken, hashSha256 } from '../../../utils/crypto.util.js';
+import { MailService } from '../../mail/mail.service.js';
 import { buildPaginatedResponse } from '../../../utils/pagination.util.js';
 import type {
   AdminInviteAdminDto,
@@ -19,7 +20,10 @@ const INVITE_TTL_DAYS = 7;
 
 @Injectable()
 export class AdminAdminsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly mailService: MailService,
+  ) {}
 
   async getAll(query: AdminListAdminsQueryDto) {
     const skip = (query.page - 1) * query.limit;
@@ -66,38 +70,45 @@ export class AdminAdminsService {
   }
 
   async inviteAdmin(actor: AdminJwtUser, dto: AdminInviteAdminDto) {
-    const existingActive = await this.prisma.db.admin.findFirst({
-      where: { email: dto.email, status: { not: 'DELETED' } },
+    const existing = await this.prisma.db.admin.findFirst({
+      where: { email: dto.email },
     });
-    if (existingActive) throw new ConflictException('An admin with this email already exists');
 
-    const pendingInvite = await this.prisma.db.adminInvite.findFirst({
-      where: {
-        admin: { email: dto.email },
-        usedAt: null,
-        expiresAt: { gt: new Date() },
-      },
-    });
-    if (pendingInvite) throw new ConflictException('A pending invite already exists for this email');
-
-    const newAdmin = await this.prisma.db.admin.create({
-      data: {
-        email: dto.email,
-        isSuperAdmin: false,
-        status: 'PENDING',
-        invitedById: actor.id,
-      },
-    });
+    if (existing && existing.status !== 'DELETED') {
+      throw new ConflictException('An admin with this email already exists');
+    }
 
     const rawToken = generateToken();
     const tokenHash = hashSha256(rawToken);
     const expiresAt = new Date(Date.now() + INVITE_TTL_DAYS * 24 * 60 * 60 * 1000);
 
+    let adminId: number;
+
+    if (existing) {
+      // Reuse the deleted record — revive it as a fresh PENDING invite
+      await this.prisma.db.admin.update({
+        where: { id: existing.id },
+        data: { status: 'PENDING', isSuperAdmin: false, invitedById: actor.id },
+      });
+      // Invalidate any leftover invites from before deletion
+      await this.prisma.db.adminInvite.updateMany({
+        where: { adminId: existing.id, usedAt: null },
+        data: { usedAt: new Date() },
+      });
+      adminId = existing.id;
+    } else {
+      const newAdmin = await this.prisma.db.admin.create({
+        data: { email: dto.email, isSuperAdmin: false, status: 'PENDING', invitedById: actor.id },
+      });
+      adminId = newAdmin.id;
+    }
+
     await this.prisma.db.adminInvite.create({
-      data: { adminId: newAdmin.id, token: tokenHash, invitedById: actor.id, expiresAt },
+      data: { adminId, token: tokenHash, invitedById: actor.id, expiresAt },
     });
 
-    return { adminId: newAdmin.id, email: newAdmin.email, inviteToken: rawToken, expiresAt };
+    void this.mailService.sendAdminInvite(dto.email, rawToken);
+    return { adminId, email: dto.email, inviteToken: rawToken, expiresAt };
   }
 
   async resendInvite(actor: AdminJwtUser, id: number) {
@@ -120,6 +131,7 @@ export class AdminAdminsService {
       data: { adminId: id, token: tokenHash, invitedById: actor.id, expiresAt },
     });
 
+    void this.mailService.sendAdminInvite(admin.email, rawToken);
     return { inviteToken: rawToken, expiresAt };
   }
 

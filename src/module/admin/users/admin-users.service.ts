@@ -1,17 +1,25 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import type { Prisma } from '../../../../generated/prisma/client.js';
 import { PrismaService } from '../../../prisma/prisma.service.js';
-import { SubscriptionBalanceStatus } from '../../../../generated/prisma/enums.js';
+import { DiscountType, SubscriptionBalanceStatus } from '../../../../generated/prisma/enums.js';
 import { buildPaginatedResponse } from '../../../utils/pagination.util.js';
 import type {
   AdminListUsersQueryDto,
   AdminTestListUsersQueryDto,
   AdminUpdateUserDto,
 } from '../../../validation/admin/admin-users.schema.js';
+import type {
+  AdminUpdateBalanceDto,
+  AdminGetUserSubscriptionHistoryQueryDto,
+} from '../../../validation/subscription/subscription.schema.js';
+import { AdminSubscriptionService } from '../subscription/admin-subscription.service.js';
 
 @Injectable()
 export class AdminUsersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly adminSubscriptionService: AdminSubscriptionService,
+  ) {}
 
   async getAll(query: AdminListUsersQueryDto) {
     const skip = (query.page - 1) * query.limit;
@@ -116,5 +124,82 @@ export class AdminUsersService {
       data: { status: dto.status },
       select: { id: true, email: true, status: true, updatedAt: true },
     });
+  }
+
+  async getUserSubscription(userId: number) {
+    const user = await this.prisma.db.user.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException('User not found');
+
+    return this.prisma.db.userSubscriptionBalance.findMany({
+      where: { userId, status: { not: SubscriptionBalanceStatus.EXPIRED } },
+      include: { plan: true },
+      orderBy: { position: 'asc' },
+    });
+  }
+
+  async updateUserSubscription(userId: number, balanceId: number, dto: AdminUpdateBalanceDto) {
+    const user = await this.prisma.db.user.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException('User not found');
+
+    const balance = await this.prisma.db.userSubscriptionBalance.findFirst({
+      where: { id: balanceId, userId },
+    });
+    if (!balance) throw new NotFoundException('Subscription balance not found for this user');
+
+    switch (dto.action) {
+      case 'changePlan':
+        return this.adminSubscriptionService.changePlan(balanceId, dto.planId!);
+      case 'extend':
+        return this.adminSubscriptionService.extendBalance(balanceId, dto.days!);
+      case 'cancel':
+        return this.adminSubscriptionService.cancelBalance(balanceId);
+      case 'setDiscount':
+        return this.adminSubscriptionService.setDiscount(
+          balanceId,
+          dto.amount!,
+          dto.discountType as DiscountType,
+        );
+      case 'suspend':
+        return this.adminSubscriptionService.suspendBalance(balanceId);
+      case 'reactivate':
+        return this.adminSubscriptionService.reactivateBalance(balanceId);
+    }
+  }
+
+  async getUserSubscriptionHistory(
+    userId: number,
+    query: AdminGetUserSubscriptionHistoryQueryDto,
+  ) {
+    const user = await this.prisma.db.user.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException('User not found');
+
+    const { page, limit } = query;
+    const skip = (page - 1) * limit;
+
+    const [data, total] = await Promise.all([
+      this.prisma.db.billingHistory.findMany({
+        where: { userId },
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+        include: { plan: true },
+      }),
+      this.prisma.db.billingHistory.count({ where: { userId } }),
+    ]);
+
+    return buildPaginatedResponse(data, total, page, limit);
+  }
+
+  async removePostalConnection(userId: number, connectionId: number) {
+    const user = await this.prisma.db.user.findUnique({ where: { id: userId } });
+    if (!user) throw new NotFoundException('User not found');
+
+    const connection = await this.prisma.db.userPostalConnection.findFirst({
+      where: { id: connectionId, userId },
+    });
+    if (!connection) throw new NotFoundException('Postal connection not found for this user');
+
+    await this.prisma.db.userPostalConnection.delete({ where: { id: connectionId } });
+    return { success: true };
   }
 }

@@ -29,7 +29,7 @@ export type UpdateBalanceDto = z.infer<typeof UpdateBalanceSchema>;
 
 export const AdminUpdateBalanceSchema = z
   .object({
-    action: z.enum(['changePlan', 'extend', 'cancel', 'setDiscount']),
+    action: z.enum(['changePlan', 'extend', 'cancel', 'setDiscount', 'suspend', 'reactivate']),
     planId: z.number().int().positive().optional(),
     days: z.number().int().positive().optional(),
     amount: z.number().positive().optional(),
@@ -60,8 +60,8 @@ export type AdminGetSubscriptionsQueryDto = z.infer<typeof AdminGetSubscriptions
 const AdminPlanShape = {
   name: z.string().min(1).max(100),
   level: z.number().int().min(0),
-  price: z.number().min(0),
-  priceYearly: z.number().min(0).optional(),
+  price: z.coerce.number().min(0),
+  priceYearly: z.coerce.number().min(0).nullable().optional(),
   maxOperators: z.number().int().positive(),
   hasAnalytics: z.boolean().default(false),
   hasTemplates: z.boolean().default(false),
@@ -70,14 +70,14 @@ const AdminPlanShape = {
   autoRenewDefault: z.boolean().default(true),
   isPublic: z.boolean().default(true),
   isPersonal: z.boolean().default(false),
-  targetUserId: z.number().int().positive().optional(),
+  targetUserId: z.number().int().positive().nullable().optional(),
   isActive: z.boolean().default(true),
 } satisfies z.ZodRawShape;
 
 const CreateAdminPlanBaseSchema = z.object(AdminPlanShape);
 
 export const CreateAdminPlanSchema = CreateAdminPlanBaseSchema.refine(
-  (d) => !d.isPersonal || d.targetUserId !== undefined,
+  (d) => !d.isPersonal || (d.targetUserId !== undefined && d.targetUserId !== null),
   { message: 'targetUserId is required for personal plans', path: ['targetUserId'] },
 );
 export type CreateAdminPlanDto = z.infer<typeof CreateAdminPlanSchema>;
@@ -98,3 +98,9 @@ export const AdminGetPlansQuerySchema = z.object({
     .transform((v) => (v === undefined ? undefined : v === 'true')),
 });
 export type AdminGetPlansQueryDto = z.infer<typeof AdminGetPlansQuerySchema>;
+
+export const AdminGetUserSubscriptionHistoryQuerySchema = z.object({
+  page: z.coerce.number().int().positive().default(1),
+  limit: z.coerce.number().int().positive().max(100).default(20),
+});
+export type AdminGetUserSubscriptionHistoryQueryDto = z.infer<typeof AdminGetUserSubscriptionHistoryQuerySchema>;

@@ -12,6 +12,7 @@ import * as bcrypt from 'bcrypt';
 import { generateSecret, generateURI, verifySync } from 'otplib';
 import QRCode from 'qrcode';
 import { PrismaService } from '../../../prisma/prisma.service.js';
+import { MailService } from '../../mail/mail.service.js';
 import {
   generateToken,
   hashSha256,
@@ -48,6 +49,7 @@ export class AuthService {
     private readonly prisma: PrismaService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
+    private readonly mailService: MailService,
   ) {}
 
   private issueAccessToken(user: {
@@ -269,7 +271,7 @@ export class AuthService {
       data: { userId: user.id, tokenHash, tokenLookupHash, expiresAt },
     });
 
-    console.log(`[EMAIL STUB] Password reset token for ${dto.email}: ${raw}`);
+    void this.mailService.sendPasswordReset(dto.email, raw);
     return GENERIC;
   }
 

@@ -3,6 +3,7 @@ import { Cron, CronExpression } from '@nestjs/schedule';
 import { PrismaService } from '../../prisma/prisma.service.js';
 import { BillingService } from '../user/billing/billing.service.js';
 import { SubscriptionService } from '../user/subscription/subscription.service.js';
+import { MailService } from '../mail/mail.service.js';
 import {
   DiscountType,
   PostalConnectionStatus,
@@ -31,6 +32,7 @@ export class SchedulerService {
     private readonly prisma: PrismaService,
     private readonly billingService: BillingService,
     private readonly subscriptionService: SubscriptionService,
+    private readonly mailService: MailService,
   ) {}
 
   @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
@@ -43,7 +45,7 @@ export class SchedulerService {
           autoRenew: true,
           periodEnd: { lte: now, not: null },
         },
-        include: { plan: true },
+        include: { plan: true, user: { select: { email: true } } },
       });
 
       for (const balance of due) {
@@ -77,6 +79,14 @@ export class SchedulerService {
             now,
             newPeriodEnd,
           );
+          if (balance.user.email) {
+            void this.mailService.sendBillingRenewal(
+              balance.user.email,
+              balance.plan.name,
+              amount,
+              newPeriodEnd,
+            );
+          }
         }
 
         this.logger.log(`Renewed balance ${balance.id} for user ${balance.userId}`);
@@ -123,7 +133,7 @@ export class SchedulerService {
           scheduledSwitchAt: { lte: now, not: null },
           status: SubscriptionBalanceStatus.ACTIVE,
         },
-        include: { plan: true },
+        include: { plan: true, user: { select: { email: true } } },
       });
 
       for (const activeBalance of pending) {
@@ -167,6 +177,14 @@ export class SchedulerService {
         });
 
         await this.subscriptionService._applyOperatorLimits(activeBalance.userId, target.plan.maxOperators);
+
+        if (activeBalance.user.email) {
+          void this.mailService.sendPlanChange(
+            activeBalance.user.email,
+            activeBalance.plan.name,
+            target.plan.name,
+          );
+        }
 
         this.logger.log(
           `Switched balance ${activeBalance.id} -> ${target.id} for user ${activeBalance.userId}`,

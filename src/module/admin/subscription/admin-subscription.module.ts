@@ -7,5 +7,6 @@ import { AdminSubscriptionService } from './admin-subscription.service.js';
   imports: [AdminAuthModule],
   controllers: [AdminSubscriptionController],
   providers: [AdminSubscriptionService],
+  exports: [AdminSubscriptionService],
 })
 export class AdminSubscriptionModule {}
