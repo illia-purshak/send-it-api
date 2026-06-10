@@ -14,6 +14,7 @@ import {
   ApiBearerAuth,
   ApiOkResponse,
   ApiOperation,
+  ApiQuery,
   ApiTags,
   ApiUnauthorizedResponse,
   ApiNotFoundResponse,
@@ -45,6 +46,13 @@ export class AdminUsersController {
 
   @Get(ADMIN_USERS_ROUTES.BASE)
   @ApiOperation({ summary: 'Paginated list of all client accounts' })
+  @ApiQuery({ name: 'page', required: false, type: 'integer', description: 'Page number (default: 1)' })
+  @ApiQuery({ name: 'limit', required: false, type: 'integer', description: 'Items per page, max 100 (default: 25)' })
+  @ApiQuery({ name: 'sortBy', required: false, enum: ['createdAt', 'email'], description: 'Sort field (default: createdAt)' })
+  @ApiQuery({ name: 'sortOrder', required: false, enum: ['asc', 'desc'], description: 'Sort direction (default: desc)' })
+  @ApiQuery({ name: 'status', required: false, enum: ['ACTIVE', 'INACTIVE', 'BANNED', 'DELETED'], description: 'Filter by account status' })
+  @ApiQuery({ name: 'plan', required: false, type: 'integer', description: 'Filter by subscription plan level (0 = FREE, 1 = PRO, 2 = BUSINESS)' })
+  @ApiQuery({ name: 'search', required: false, type: 'string', description: 'Search by email or company name (case-insensitive, max 100 chars)' })
   @ApiOkResponse({ description: 'User list' })
   @ApiUnauthorizedResponse()
   getAll(

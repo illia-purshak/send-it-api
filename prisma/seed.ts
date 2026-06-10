@@ -172,6 +172,87 @@ async function main() {
     update: { passwordHash },
   });
 
+  const novaPost = await db.postalService.findUnique({ where: { slug: 'nova-post' } });
+
+  if (novaPost) {
+    const templateSeeds = [
+      {
+        name: 'Нова Пошта: Відправлення по Україні',
+        description: 'Стандартне відправлення між відділеннями Нової Пошти всередині України.',
+        shipmentType: 'PACKAGE' as const,
+        templateData: {
+          status: 'ReadyToShip',
+          payerType: 'Sender',
+          sender: { countryCode: 'UA' },
+          recipient: { countryCode: 'UA' },
+          parcels: [
+            {
+              rowNumber: 1,
+              cargoCategory: 'parcel',
+              parcelDescription: 'Товар',
+              insuranceCost: 500,
+              length: 300,
+              width: 200,
+              height: 100,
+              actualWeight: 1000,
+            },
+          ],
+        },
+      },
+      {
+        name: 'Нова Пошта: Міжнародне відправлення (UA→EU)',
+        description: 'Міжнародне відправлення з України до Європи з митною декларацією.',
+        shipmentType: 'PACKAGE' as const,
+        templateData: {
+          status: 'ReadyToShip',
+          payerType: 'Sender',
+          deliveryType: 'standard',
+          sender: { countryCode: 'UA' },
+          recipient: { countryCode: 'DE' },
+          parcels: [
+            {
+              rowNumber: 1,
+              cargoCategory: 'parcel',
+              parcelDescription: 'Товар',
+              insuranceCost: 100,
+              insuranceCurrencyCode: 'EUR',
+              length: 400,
+              width: 300,
+              height: 200,
+              actualWeight: 1500,
+            },
+          ],
+          invoice: {
+            type: 'Invoice',
+            incoterm: 'DAP',
+            exportReason: 'Selling',
+            currency: 'EUR',
+            payerFeesCustoms: 'Recipient',
+            items: [],
+          },
+        },
+      },
+    ];
+
+    for (const seed of templateSeeds) {
+      const exists = await db.shipmentTemplate.findFirst({
+        where: { userId: client.id, name: seed.name },
+      });
+      if (!exists) {
+        await db.shipmentTemplate.create({
+          data: {
+            userId: client.id,
+            postalServiceId: novaPost.id,
+            name: seed.name,
+            description: seed.description,
+            shipmentType: seed.shipmentType,
+            templateData: seed.templateData,
+          },
+        });
+      }
+    }
+  }
+
   await db.$disconnect();
 
   console.log('Seed complete');
