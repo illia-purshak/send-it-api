@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   Injectable,
   ServiceUnavailableException,
   UnprocessableEntityException,
@@ -93,6 +94,19 @@ export class NovaPostApiClient {
     }
 
     if (!response.ok) {
+      let body: Record<string, unknown> = {};
+      try {
+        body = (await response.json()) as Record<string, unknown>;
+      } catch {}
+
+      if (response.status === 400 || response.status === 422) {
+        throw new BadRequestException({
+          code: 'OPERATOR_VALIDATION_ERROR',
+          message: 'Postal operator rejected the request',
+          details: body,
+        });
+      }
+
       throw new ServiceUnavailableException({
         code: 'OPERATOR_UNAVAILABLE',
         message: 'The postal operator is temporarily unavailable. Please try again later.',
